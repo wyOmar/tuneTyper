@@ -32,11 +32,11 @@ async function fetchTracks(query) {
     if (!response.ok) throw new Error('Failed to fetch tracks.');
     const data = await response.json();
 
+
     if (searchType === "song") {
-        
-        return data.data.filter(track => track.title.toLowerCase().includes(query.toLowerCase()));
+        return data.data.filter(track => normalizeText(track.title).includes(normalizeText(query)));
     }
-    return data.data; 
+    return data.data;
 
 }
 
@@ -87,7 +87,20 @@ async function fetchTopTracks(artistId) {
 async function getLyricsFromArtistOrSong(inputValue) {
     const searchType = searchTypeDropdown.value;
 
-    if (searchType === "artist") {
+    if (searchType === "song") {
+        
+        const tracks = await fetchTracks(inputValue);
+        if (tracks.length === 0) throw new Error('No songs found for the given name.');
+        const topResult = tracks[0];
+        selectedTrack = topResult; 
+
+        try {
+            const lyrics = await fetchLyrics(topResult.artist.name, topResult.title);
+            return lyrics;
+        } catch (error) {
+            throw new Error('Failed to fetch lyrics for the selected song.');
+        }
+    } else if (searchType === "artist") {
         
         const artistId = await fetchArtistId(inputValue);
         const tracks = await fetchTopTracks(artistId);
@@ -102,27 +115,6 @@ async function getLyricsFromArtistOrSong(inputValue) {
                 lyrics = await fetchLyrics(selectedTrack.artist.name, selectedTrack.title);
             } catch {
                 console.log(`Failed to fetch lyrics for: ${selectedTrack.title}, trying another...`);
-            }
-        }
-
-        if (!lyrics) throw new Error('Failed to fetch lyrics for any track.');
-        return lyrics;
-
-    } else if (searchType === "song") {
-        
-        const tracks = await fetchTracks(inputValue);
-        const filteredTracks = tracks.slice(0, 3);
-
-        if (filteredTracks.length === 0) throw new Error('No tracks found.');
-
-        let lyrics = null;
-        while (filteredTracks.length > 0 && !lyrics) {
-            const track = filteredTracks.shift();
-            try {
-                selectedTrack = track;
-                lyrics = await fetchLyrics(track.artist.name, track.title);
-            } catch {
-                console.log(`Failed to fetch lyrics for: ${track.title} by ${track.artist.name}, trying another...`);
             }
         }
 
@@ -192,20 +184,20 @@ function normalizeTextForTyping(text, removePunctuation = false, removeAdlibs = 
     return text.trim();
 }
 
-function normalizeTextForGuessing(text) {
+function normalizeText(text) {
     
     // hour of my life wasted because for some reason 2 unicode characters exist for "e"
     return text
-        .normalize('NFKD')
-        .replace(/[^\x00-\x7F]/g, '') // ascii
+        .normalize('NFKD') // for letter hats
+        .replace(/[^\x00-\x7F]/g, '') // ascii only gate
         .toLowerCase()
         // for the wonderful versions of ' ` " that exists because why wouldnt they
         .replace(/[\u2018\u2019\u201A\u201B]/g, "'")  
         .replace(/[\u201C\u201D\u201E\u201F]/g, '"') 
-        .replace(/'/g, '') 
-        .replace(/\(.*?\)/g, '') 
+        .replace(/'/g, '')  
+        .replace(/\(.*?\)/g, '') // adlibs in song title
         .replace(/[!"£$%^&*()\-+=_@:;#~[\]{},.<>?/]/g, '') // punctuation
-        .replace(/\s+/g, ''); // Remove spaces
+        .replace(/\s+/g, ''); 
 }
 
 
@@ -228,6 +220,7 @@ function resetGame() {
     guessInput.value = '';
     removePunctuationCheckbox.disabled = false;
     removeAdlibsCheckbox.disabled = false;
+    searchTypeDropdown.disabled = false;
     endGameBtn.style.display = 'none'; 
 }
 
@@ -270,8 +263,8 @@ function calculateWPM() {
 
 // Guessing Game
 function handleGuess() {
-    const userGuess = normalizeTextForGuessing(guessInput.value);
-    const correctAnswer = normalizeTextForGuessing(selectedTrack.title);
+    const userGuess = normalizeText(guessInput.value);
+    const correctAnswer = normalizeText(selectedTrack.title);
 
     guessCount++;
 
@@ -293,21 +286,32 @@ function handleGuess() {
 
 
 function showFinalInfo() {
-    songInfo.innerHTML = `
-        <p><strong>Guesses Used:</strong> ${guessCount}</p>
+    const searchType = searchTypeDropdown.value; // Check the dropdown value
+
+    // Build the HTML based on the search type
+    let infoHTML = `
         <h3>${selectedTrack.title} by ${selectedTrack.artist.name}</h3>
-        
         <img id="album-image" src="${selectedTrack.album.cover_medium}" alt="${selectedTrack.album.title}">
         <audio id="song-preview" controls autoplay>
             <source src="${selectedTrack.preview}" type="audio/mpeg">
-            Your browser does not support the audio element.
+            Audio element error
         </audio>
+        
     `;
+
+    if (searchType !== "song") {
+        infoHTML = `
+            <p><strong>Guesses:</strong> ${guessCount}</p>
+            ${infoHTML}
+        `;
+    }
+
+    songInfo.innerHTML = infoHTML;
     guessSection.style.display = 'none';
 
     const audioElement = document.getElementById('song-preview');
     if (audioElement) {
-        audioElement.volume = 0.25; // default
+        audioElement.volume = 0.25; // default volume 25%
     }
 }
 
@@ -328,6 +332,7 @@ typingArea.addEventListener('input', () => {
         testStarted = true;
         removePunctuationCheckbox.disabled = true;
         removeAdlibsCheckbox.disabled = true;
+        searchTypeDropdown.disabled = true;
     }
 
     const typedText = typingArea.value.trim();
@@ -341,11 +346,9 @@ typingArea.addEventListener('input', () => {
         updateWordHighlight();
 
         if (currentWordIndex === processedWords.length) {
-            typingArea.disabled = true;
-            typingArea.style.display = 'none'; 
-            wpmResult.textContent = `Final WPM: ${calculateWPM()}`;
-            guessSection.style.display = 'block';
-            endGameBtn.style.display = 'none';  
+
+            endGame();
+            searchTypeDropdown.disabled = false;
             return;
         }
     } else if (!normalizedCurrentWord.startsWith(normalizedTypedText)) {
@@ -381,6 +384,8 @@ startBtn.addEventListener('click', async () => {
         alert('Please enter a valid input.');
         return;
     }
+    startBtn.disabled = true;
+    
 
     resetGame();
     try {
@@ -388,12 +393,15 @@ startBtn.addEventListener('click', async () => {
         originalText = extractRandomSection(fullLyrics);
         updateDisplayedText();
 
-        
         endGameBtn.style.display = 'inline-block';
     } catch (error) {
         alert(error.message);
+    } finally {
+        startBtn.disabled = false;
+        
     }
 });
+
 
 const endGameBtn = document.getElementById('end-game-btn');
 
@@ -403,9 +411,20 @@ function endGame() {
     typingArea.disabled = true;
     typingArea.style.display = 'none'; 
     wpmResult.textContent = `Final WPM: ${calculateWPM()}`;
-    guessSection.style.display = 'block';
+    guessSection.style.display = 'none';
     endGameBtn.style.display = 'none';
+
+    
+    const searchType = searchTypeDropdown.value;
+    //console.log(searchType)
+    if (searchType === "song") {
+        showFinalInfo();
+    } else {
+        
+        guessSection.style.display = 'block';
+    }
 }
+
 endGameBtn.addEventListener('click', endGame);
 
 
