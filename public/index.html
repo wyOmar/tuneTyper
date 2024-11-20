@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tune Typer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Tune Typer</h1>
+
+        <div class="input-section">
+            <select id="search-type">
+                <option value="artist" selected>Artist</option>
+                <option value="song">Song</option>
+            </select>
+            <input type="text" id="artist-input" placeholder="Input">
+            <button id="start-btn">Start</button>
+            <label for="remove-punctuation" class="checkbox-label">
+                <input type="checkbox" id="remove-punctuation" checked>
+                Punctuation
+            </label>
+            <label for="remove-adlibs" class="checkbox-label">
+                <input type="checkbox" id="remove-adlibs" checked>
+                Ad-libs
+            </label>
+        </div>
+
+        <div class="game-section">
+            <p id="display-text" class="text-display"></p>
+            <div class="typing-area-container">
+                <textarea id="typing-area" rows="3" placeholder="Start typing here..." disabled></textarea>
+                <button id="end-game-btn" style="display: none;">End Game</button>
+            </div>
+            <p id="wpm-result" class="result-text"></p>
+        </div>
+
+        <div id="guess-section" class="guess-section" style="display: none;">
+            <h3>Guess the Song</h3>
+            <div class="guess-input-container">
+                <input type="text" id="guess-input" placeholder="Start typing here...">
+                <button id="give-up" style="display: none;">Give Up</button>
+            </div>
+            <p id="guess-feedback"></p>
+        </div>
+
+        <div id="song-info" class="song-info"></div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
