@@ -1,3 +1,4 @@
+/* General Styles */
 body {
     font-family: Arial, sans-serif;
     margin: 0;
@@ -6,22 +7,24 @@ body {
     color: #fff;
 }
 
+/* Container */
 .container {
     max-width: 800px;
-    margin: 15px auto;
+    margin: 15px auto 0;
     padding: 25px;
     background: #1e1e1e;
     border-radius: 10px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
 }
 
+/* Headings */
 h1 {
     text-align: center;
     color: #fff;
-    margin: 10px;
-    margin-top: 0px;
+    margin: 10px 0 0;
 }
 
+/* Input Section */
 .input-section {
     display: flex;
     align-items: center;
@@ -30,24 +33,22 @@ h1 {
     margin-bottom: 20px;
 }
 
-#artist-input {
+#artist-input, #search-type {
     padding: 10px;
     font-size: 18px;
-    width: 46.5%;
+    font-family: monospace;
     border: 1px solid #444;
     border-radius: 5px;
     background-color: #333;
     color: #fff;
 }
 
+#artist-input {
+    width: 46.5%;
+}
+
 #search-type {
-    padding: 10px;
-    font-size: 18px;
     width: 15%;
-    border: 1px solid #444;
-    border-radius: 5px;
-    background-color: #333;
-    color: #fff;
 }
 
 #artist-input::placeholder {
@@ -68,6 +69,7 @@ h1 {
     background-color: #4A617D;
 }
 
+/* Checkbox Label */
 .checkbox-label {
     font-size: 14px;
     color: #fff;
@@ -76,6 +78,7 @@ h1 {
     gap: 5px;
 }
 
+/* Game Section */
 .game-section {
     margin-bottom: 20px;
 }
@@ -111,6 +114,7 @@ h1 {
     color: #f44336;
 }
 
+/* Typing Area */
 .typing-area-container {
     display: flex;
     align-items: center;
@@ -146,7 +150,6 @@ h1 {
     border: none;
     border-radius: 5px;
     cursor: pointer;
-    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -156,6 +159,7 @@ h1 {
     background-color: #b52a37;
 }
 
+/* Result and Song Info */
 .result-text, .song-info p, .song-info h3 {
     font-size: 20px;
     font-weight: 600;
@@ -167,16 +171,14 @@ h1 {
 
 .song-info h3 {
     font-size: 22px;
-    color: #fff;
 }
 
 .result-text {
-    font-size: 20px;
-    font-weight: 600;
     margin-bottom: 10px;
     color: #4caf50;
 }
 
+/* Guess Section */
 .guess-section {
     text-align: center;
     margin-top: 20px;
@@ -197,6 +199,7 @@ h1 {
 #guess-input {
     width: 80%;
     font-size: 18px;
+    font-family: monospace;
     padding: 10px;
     border: 1px solid #333;
     border-radius: 5px;
@@ -204,7 +207,6 @@ h1 {
     color: #fff;
     resize: none;
 }
-
 
 #guess-input::placeholder {
     color: #888;
@@ -219,7 +221,6 @@ h1 {
     border: none;
     border-radius: 5px;
     cursor: pointer;
-    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -234,6 +235,7 @@ h1 {
     margin-top: 10px;
 }
 
+/* Song Info Section */
 .song-info {
     text-align: center;
     margin-top: 20px;
@@ -243,14 +245,30 @@ h1 {
     max-width: 100%;
     height: auto;
     border-radius: 5px;
-    
 }
 
 .song-info audio {
     display: block;
-    margin: 0 auto 15px;
+    margin: 10px auto 15px;
     width: 100%;
     max-width: 300px;
-    margin-top: 10px;
+}
 
+/* Navbar */
+.navbar {
+    display: flex;
+    background-color: #1e1e1e; 
+    padding: 10px 20px;
+    border-bottom: 2px solid #333; 
+}
+
+.navbar-logo {
+    height: 32px; 
+    width: 32px;
+    margin-right: 15px; 
+}
+
+.navbar-title {
+    font-size: 1.8rem; 
+    margin: 0; 
 }

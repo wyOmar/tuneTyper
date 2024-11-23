@@ -1,0 +1,4 @@
+User-agent: *
+Disallow:
+
+Sitemap: https://type.vincentchan.uk/sitemap.xml

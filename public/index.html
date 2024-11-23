@@ -3,12 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tune Typer</title>
     <link rel="stylesheet" href="styles.css">
+
+    <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
+    <link rel="manifest" href="/favicon/site.webmanifest">
+    <link rel="shortcut icon" href="/favicon/favicon.ico">
+
+    <title>TuneTyper - Type Song Lyrics, Guess the Tune, Improve Your Typing!</title>
+    <meta name="description" content="Play TuneTyper, the ultimate typing game for music lovers! Pull song lyrics from your favorite artists, type them to test your speed, and guess the tune for extra fun. Improve your typing skills and enjoy music snippets along the way.">
+    <meta name="keywords" content="typing game, music game, song lyrics typing, WPM typing test, typing speed, music lovers, guess the tune, typing and music">
+    <meta name="author" content="Vincent Chan">
+    <meta name="robots" content="index, follow">
+    <meta property="og:title" content="TuneTyper - The Typing Game for Music Enthusiasts">
+    <meta property="og:description" content="Test your typing skills with TuneTyper! Input your favorite artist, type song lyrics, and guess the tune. A fun game for music and typing fans.">
+    <meta property="og:url" content="https://type.vincentchan.uk">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="https://type.vincentchan.uk/favicon/favicon-32x32.png">
+    <meta property="og:site_name" content="TuneTyper">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="TuneTyper - Type Song Lyrics and Guess the Tune!">
+    <meta name="twitter:description" content="Pull song lyrics, type them to test your speed, and guess the tune in TuneTyper. Perfect for music lovers and typing enthusiasts!">
+    <meta name="twitter:image" content="https://type.vincentchan.uk/favicon/favicon-32x32.png">
+    
 </head>
 <body>
+
+    <div class="navbar">
+        <img src="/favicon/favicon-32x32.png" alt="Site Logo" class="navbar-logo">
+        <h1 class="navbar-title">TuneTyper</h1>
+    </div>
+    
     <div class="container">
-        <h1>Tune Typer</h1>
+
 
         <div class="input-section">
             <select id="search-type">
@@ -16,7 +44,7 @@
                 <option value="song">Song</option>
             </select>
             <input type="text" id="artist-input" placeholder="Input">
-            <button id="start-btn">Go!</button>
+            <button id="start-btn">Go</button>
             <label for="remove-punctuation" class="checkbox-label">
                 <input type="checkbox" id="remove-punctuation" checked>
                 Punctuation
@@ -40,7 +68,7 @@
             
             <div class="guess-input-container">
                 <input type="text" id="guess-input" placeholder="Guess the song...">
-                <button id="give-up" style="display: none;">Reveal Song</button>
+                <button id="give-up" style="display: none;">Reveal</button>
             </div>
             <p id="guess-feedback"></p>
         </div>
@@ -49,5 +77,21 @@
     </div>
 
     <script src="script.js"></script>
+
+    <script type="application/ld+json">
+        {
+          "@context": "https://schema.org",
+          "@type": "WebSite",
+          "name": "TuneTyper",
+          "url": "https://type.vincentchan.uk",
+          "description": "A fun typing game for music lovers. Improve and test your typing speed on your favourite song lyrics!",
+          "author": {
+            "@type": "Person",
+            "name": "Vincent Chan"
+          }
+        }
+    </script>
+
 </body>
+
 </html>

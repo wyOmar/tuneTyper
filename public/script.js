@@ -1,3 +1,4 @@
+// Frontend
 const artistInput = document.getElementById('artist-input');
 const startBtn = document.getElementById('start-btn');
 const typingArea = document.getElementById('typing-area');
@@ -5,17 +6,15 @@ const displayText = document.getElementById('display-text');
 const wpmResult = document.getElementById('wpm-result');
 const removePunctuationCheckbox = document.getElementById('remove-punctuation');
 const removeAdlibsCheckbox = document.getElementById('remove-adlibs');
-
 const songInfo = document.getElementById('song-info');
 const guessSection = document.getElementById('guess-section');
 const guessInput = document.getElementById('guess-input');
 const giveUpButton = document.getElementById('give-up');
 const guessFeedback = document.getElementById('guess-feedback');
-
 const searchTypeDropdown = document.getElementById('search-type');
+const endGameBtn = document.getElementById('end-game-btn');
 
-
-// variables
+// Variables
 let originalText = "";
 let processedWords = [];
 let currentWordIndex = 0;
@@ -32,14 +31,11 @@ async function fetchTracks(query) {
     if (!response.ok) throw new Error('Failed to fetch tracks.');
     const data = await response.json();
 
-
     if (searchType === "song") {
         return data.data.filter(track => normalizeText(track.title).includes(normalizeText(query)));
     }
     return data.data;
-
 }
-
 
 async function fetchLyrics(artist, track) {
     const response = await fetch(`/lyrics?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`);
@@ -49,14 +45,11 @@ async function fetchLyrics(artist, track) {
     return data.lyrics;
 }
 
-
 async function fetchArtistId(artistName) {
     const response = await fetch(`/tracks?artist=${encodeURIComponent(artistName)}`);
     if (!response.ok) throw new Error('Failed to fetch artist data.');
     const data = await response.json();
     if (data.data.length === 0) throw new Error('Artist not found.');
-
-    // top 5 to make sure their most popular isnt a feature
 
     const topResults = data.data.slice(0, 5);
     const artistCount = {};
@@ -66,33 +59,28 @@ async function fetchArtistId(artistName) {
         artistCount[artistId] = (artistCount[artistId] || 0) + 1;
     });
 
-    
-    const mostFrequentArtistId = Object.keys(artistCount).reduce((a, b) => 
+    const mostFrequentArtistId = Object.keys(artistCount).reduce((a, b) =>
         artistCount[a] > artistCount[b] ? a : b
     );
 
     return mostFrequentArtistId;
 }
 
-
-// top tracks
 async function fetchTopTracks(artistId) {
     const response = await fetch(`/top-tracks?artistId=${artistId}`);
     if (!response.ok) throw new Error('Failed to fetch top tracks.');
     const data = await response.json();
-    return data.data; 
+    return data.data;
 }
-
 
 async function getLyricsFromArtistOrSong(inputValue) {
     const searchType = searchTypeDropdown.value;
 
     if (searchType === "song") {
-        
         const tracks = await fetchTracks(inputValue);
         if (tracks.length === 0) throw new Error('No songs found for the given name.');
         const topResult = tracks[0];
-        selectedTrack = topResult; 
+        selectedTrack = topResult;
 
         try {
             const lyrics = await fetchLyrics(topResult.artist.name, topResult.title);
@@ -101,7 +89,6 @@ async function getLyricsFromArtistOrSong(inputValue) {
             throw new Error('Failed to fetch lyrics for the selected song.');
         }
     } else if (searchType === "artist") {
-        
         const artistId = await fetchArtistId(inputValue);
         const tracks = await fetchTopTracks(artistId);
 
@@ -125,14 +112,12 @@ async function getLyricsFromArtistOrSong(inputValue) {
     throw new Error('Invalid search type selected.');
 }
 
-
 // Utility Functions
 function extractRandomSection(text, minLength = 150, maxLength = 300) {
-    const lines = text.split('\n').filter(line => line.trim()); 
+    const lines = text.split('\n').filter(line => line.trim());
     let selectedText = '';
     let totalLength = 0;
 
-   
     let startIndex = Math.floor(Math.random() * lines.length);
 
     while (totalLength < minLength && startIndex >= 0) {
@@ -159,58 +144,44 @@ function extractRandomSection(text, minLength = 150, maxLength = 300) {
     return selectedText.trim();
 }
 
-
 function normalizeTextForTyping(text, removePunctuation = false, removeAdlibs = false) {
     text = text.normalize('NFKD').replace(/е/g, 'e');
-    text = text.normalize('NFKD').replace(/[^\x00-\x7F]/g, ''); // ascii
-
-    // for some reason the geniuses of lyrics api being used has weird untypable characters which is just brilliant for a typing game
-    
-   
-    // for the wonderful versions of ' ` " that exists because why wouldnt they
-    text = text.replace(/[\u2018\u2019\u201A\u201B]/g, "'")  
+    text = text.normalize('NFKD').replace(/[^\x00-\x7F]/g, '');
+    text = text.replace(/[\u2018\u2019\u201A\u201B]/g, "'")
                .replace(/[\u201C\u201D\u201E\u201F]/g, '"');
     if (removeAdlibs) {
-        // remove upto 15 char adlibs
-        text = text.replace(/\(\s*[^()]{1,15}\s*\)/g, ''); 
+        text = text.replace(/\(\s*[^()]{1,15}\s*\)/g, '');
     }
     if (removePunctuation) {
-        // punctuation and special characters
         text = text.replace(/[\p{P}\p{S}]/gu, '').toLowerCase();
     }
-
-  
 
     return text.trim();
 }
 
 function normalizeText(text) {
-    
-    // hour of my life wasted because for some reason 2 unicode characters exist for "e"
     return text
-        .normalize('NFKD') // for letter hats
-        .replace(/[^\x00-\x7F]/g, '') // ascii only gate
+        .normalize('NFKD')
+        .replace(/[^\x00-\x7F]/g, '')
         .toLowerCase()
-        // for the wonderful versions of ' ` " that exists because why wouldnt they
-        .replace(/[\u2018\u2019\u201A\u201B]/g, "'")  
-        .replace(/[\u201C\u201D\u201E\u201F]/g, '"') 
-        .replace(/'/g, '')  
-        .replace(/\(.*?\)/g, '') // adlibs in song title
-        .replace(/[!"£$%^&*()\-+=_@:;#~[\]{},.<>?/]/g, '') // punctuation
-        .replace(/\s+/g, ''); 
+        .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+        .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+        .replace(/'/g, '')
+        .replace(/\(.*?\)/g, '')
+        .replace(/[!"£$%^&*()\-+=_@:;#~[\]{},.<>?/]/g, '')
+        .replace(/\s+/g, '');
 }
 
-
-
+// Game Functions
 function resetGame() {
     currentWordIndex = 0;
     startTime = null;
     testStarted = false;
     hasShownHint = false;
-    guessCount = 0; 
+    guessCount = 0;
 
     typingArea.value = '';
-    typingArea.style.display = 'block'; 
+    typingArea.style.display = 'block';
     typingArea.disabled = true;
     displayText.innerHTML = '';
     wpmResult.textContent = '';
@@ -221,13 +192,12 @@ function resetGame() {
     removePunctuationCheckbox.disabled = false;
     removeAdlibsCheckbox.disabled = false;
     searchTypeDropdown.disabled = false;
-    endGameBtn.style.display = 'none'; 
+    endGameBtn.style.display = 'none';
 }
 
-
 function updateDisplayedText() {
-    const removePunctuation = !removePunctuationCheckbox.checked; 
-    const removeAdlibs = !removeAdlibsCheckbox.checked; 
+    const removePunctuation = !removePunctuationCheckbox.checked;
+    const removeAdlibs = !removeAdlibsCheckbox.checked;
     const textToDisplay = normalizeTextForTyping(originalText, removePunctuation, removeAdlibs);
     processedWords = textToDisplay.split(/\s+/).filter(Boolean);
 
@@ -239,7 +209,6 @@ function updateDisplayedText() {
     typingArea.disabled = false;
     typingArea.focus();
 }
-
 
 function updateWordHighlight() {
     document.querySelectorAll('span').forEach((span, index) => {
@@ -261,7 +230,6 @@ function calculateWPM() {
     return Math.round((currentWordIndex / elapsedTime) * 60);
 }
 
-// Guessing Game
 function handleGuess() {
     const userGuess = normalizeText(guessInput.value);
     const correctAnswer = normalizeText(selectedTrack.title);
@@ -270,7 +238,7 @@ function handleGuess() {
 
     if (userGuess === correctAnswer) {
         guessFeedback.innerHTML = '<span style="color: green;"></span>';
-        showFinalInfo(); 
+        showFinalInfo();
     } else {
         if (!hasShownHint) {
             hasShownHint = true;
@@ -283,12 +251,9 @@ function handleGuess() {
     }
 }
 
-
-
 function showFinalInfo() {
-    const searchType = searchTypeDropdown.value; // Check the dropdown value
+    const searchType = searchTypeDropdown.value;
 
-    // Build the HTML based on the search type
     let infoHTML = `
         <h3>${selectedTrack.title} by ${selectedTrack.artist.name}</h3>
         <img id="album-image" src="${selectedTrack.album.cover_medium}" alt="${selectedTrack.album.title}">
@@ -296,7 +261,6 @@ function showFinalInfo() {
             <source src="${selectedTrack.preview}" type="audio/mpeg">
             Audio element error
         </audio>
-        
     `;
 
     if (searchType !== "song") {
@@ -311,19 +275,32 @@ function showFinalInfo() {
 
     const audioElement = document.getElementById('song-preview');
     if (audioElement) {
-        audioElement.volume = 0.25; // default volume 25%
+        audioElement.volume = 0.25;
     }
 }
 
-
-
-
 function giveUp() {
     guessFeedback.innerHTML = `<span style="color: orange;">The correct answer was: ${selectedTrack.title}</span>`;
-    guessCount = "Revealed"; 
-    showFinalInfo(); 
+    guessCount = "Revealed";
+    showFinalInfo();
 }
 
+function endGame() {
+    if (!testStarted) return;
+
+    typingArea.disabled = true;
+    typingArea.style.display = 'none';
+    wpmResult.textContent = `Final WPM: ${calculateWPM()}`;
+    guessSection.style.display = 'none';
+    endGameBtn.style.display = 'none';
+
+    const searchType = searchTypeDropdown.value;
+    if (searchType === "song") {
+        showFinalInfo();
+    } else {
+        guessSection.style.display = 'block';
+    }
+}
 
 // Event Listeners
 typingArea.addEventListener('input', () => {
@@ -346,7 +323,6 @@ typingArea.addEventListener('input', () => {
         updateWordHighlight();
 
         if (currentWordIndex === processedWords.length) {
-
             endGame();
             searchTypeDropdown.disabled = false;
             return;
@@ -360,20 +336,19 @@ typingArea.addEventListener('input', () => {
     wpmResult.textContent = `Current WPM: ${calculateWPM()}`;
 });
 
-// enter to guess
 guessInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') {
         event.preventDefault();
-        handleGuess(); 
+        handleGuess();
     }
 });
-
 
 giveUpButton.addEventListener('click', giveUp);
 
 removePunctuationCheckbox.addEventListener('change', () => {
     if (!testStarted) updateDisplayedText();
 });
+
 removeAdlibsCheckbox.addEventListener('change', () => {
     if (!testStarted) updateDisplayedText();
 });
@@ -385,47 +360,18 @@ startBtn.addEventListener('click', async () => {
         return;
     }
     startBtn.disabled = true;
-    
 
     resetGame();
     try {
         const fullLyrics = await getLyricsFromArtistOrSong(inputValue);
         originalText = extractRandomSection(fullLyrics);
         updateDisplayedText();
-
         endGameBtn.style.display = 'inline-block';
     } catch (error) {
         alert(error.message);
     } finally {
         startBtn.disabled = false;
-        
     }
 });
 
-
-const endGameBtn = document.getElementById('end-game-btn');
-
-function endGame() {
-    if (!testStarted) return;
-
-    typingArea.disabled = true;
-    typingArea.style.display = 'none'; 
-    wpmResult.textContent = `Final WPM: ${calculateWPM()}`;
-    guessSection.style.display = 'none';
-    endGameBtn.style.display = 'none';
-
-    
-    const searchType = searchTypeDropdown.value;
-    //console.log(searchType)
-    if (searchType === "song") {
-        showFinalInfo();
-    } else {
-        
-        guessSection.style.display = 'block';
-    }
-}
-
 endGameBtn.addEventListener('click', endGame);
-
-
-
