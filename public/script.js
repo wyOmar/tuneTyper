@@ -23,6 +23,10 @@ let testStarted = false;
 let selectedTrack = null;
 let guessCount = 0;
 let hasShownHint = false;
+let previousArtist = "";
+let lastQueriedArtist = null;
+let lastArtistTracks = [];
+let cachedSongLyrics = {};
 
 // API Fetch Functions
 async function fetchTracks(query) {
@@ -46,11 +50,14 @@ async function fetchLyrics(artist, track) {
 }
 
 async function fetchArtistId(artistName) {
+    // Exists because to fetchTopTracks we need their DeezerID
+    // Sometimes the most popular song of the artist we search is a collab song or they are a feature, so we look at the top 5 results to guarantee we get the id of the artist we want
     const response = await fetch(`/tracks?artist=${encodeURIComponent(artistName)}`);
     if (!response.ok) throw new Error('Failed to fetch artist data.');
     const data = await response.json();
     if (data.data.length === 0) throw new Error('Artist not found.');
 
+    
     const topResults = data.data.slice(0, 5);
     const artistCount = {};
 
@@ -71,45 +78,6 @@ async function fetchTopTracks(artistId) {
     if (!response.ok) throw new Error('Failed to fetch top tracks.');
     const data = await response.json();
     return data.data;
-}
-
-async function getLyricsFromArtistOrSong(inputValue) {
-    const searchType = searchTypeDropdown.value;
-
-    if (searchType === "song") {
-        const tracks = await fetchTracks(inputValue);
-        if (tracks.length === 0) throw new Error('No songs found for the given name.');
-        const topResult = tracks[0];
-        selectedTrack = topResult;
-
-        try {
-            const lyrics = await fetchLyrics(topResult.artist.name, topResult.title);
-            return lyrics;
-        } catch (error) {
-            throw new Error('Failed to fetch lyrics for the selected song.');
-        }
-    } else if (searchType === "artist") {
-        const artistId = await fetchArtistId(inputValue);
-        const tracks = await fetchTopTracks(artistId);
-
-        if (tracks.length === 0) throw new Error('No top tracks found.');
-
-        let lyrics = null;
-        while (tracks.length > 0 && !lyrics) {
-            const randomIndex = Math.floor(Math.random() * tracks.length);
-            selectedTrack = tracks.splice(randomIndex, 1)[0];
-            try {
-                lyrics = await fetchLyrics(selectedTrack.artist.name, selectedTrack.title);
-            } catch {
-                console.log(`Failed to fetch lyrics for: ${selectedTrack.title}, trying another...`);
-            }
-        }
-
-        if (!lyrics) throw new Error('Failed to fetch lyrics for any track.');
-        return lyrics;
-    }
-
-    throw new Error('Invalid search type selected.');
 }
 
 // Utility Functions
@@ -145,6 +113,7 @@ function extractRandomSection(text, minLength = 150, maxLength = 300) {
 }
 
 function normalizeTextForTyping(text, removePunctuation = false, removeAdlibs = false) {
+    // The API being used for lyrics, ovh, sometimes returns lyrics with weird characters like that weird "e"
     text = text.normalize('NFKD').replace(/е/g, 'e');
     text = text.normalize('NFKD').replace(/[^\x00-\x7F]/g, '');
     text = text.replace(/[\u2018\u2019\u201A\u201B]/g, "'")
@@ -239,6 +208,7 @@ function handleGuess() {
     if (userGuess === correctAnswer) {
         guessFeedback.innerHTML = '<span style="color: green;"></span>';
         showFinalInfo();
+
     } else {
         if (!hasShownHint) {
             hasShownHint = true;
@@ -272,6 +242,7 @@ function showFinalInfo() {
 
     songInfo.innerHTML = infoHTML;
     guessSection.style.display = 'none';
+    searchTypeDropdown.disabled = false;
 
     const audioElement = document.getElementById('song-preview');
     if (audioElement) {
@@ -299,6 +270,7 @@ function endGame() {
         showFinalInfo();
     } else {
         guessSection.style.display = 'block';
+        guessInput.focus(); 
     }
 }
 
@@ -355,18 +327,24 @@ removeAdlibsCheckbox.addEventListener('change', () => {
 
 startBtn.addEventListener('click', async () => {
     const inputValue = artistInput.value.trim();
+    const searchType = searchTypeDropdown.value; // "Artist","Song"
+
     if (!inputValue) {
         alert('Please enter a valid input.');
         return;
     }
-    startBtn.disabled = true;
 
+    startBtn.disabled = true;
     resetGame();
+
     try {
-        const fullLyrics = await getLyricsFromArtistOrSong(inputValue);
-        originalText = extractRandomSection(fullLyrics);
-        updateDisplayedText();
-        endGameBtn.style.display = 'inline-block';
+        if (searchType === 'artist') {
+            await handleArtistSearch(inputValue);
+        } else if (searchType === 'song') {
+            await handleSongSearch(inputValue);
+        } else {
+            throw new Error('Invalid search type selected.');
+        }
     } catch (error) {
         alert(error.message);
     } finally {
@@ -374,4 +352,113 @@ startBtn.addEventListener('click', async () => {
     }
 });
 
-endGameBtn.addEventListener('click', endGame);
+artistInput.addEventListener('keydown', function(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault(); 
+        startBtn.click(); 
+    }
+});
+
+endGameBtn.addEventListener('click', () => {
+    endGame();
+    searchTypeDropdown.disabled = false;
+});
+
+// Button Logic
+async function handleArtistSearch(artistName) {
+    if (artistName === previousArtist && lastArtistTracks.length > 0) {
+        console.log(`Using cached tracks for artist: ${artistName}`);
+    } else {
+        console.log(`Fetching tracks for new artist: ${artistName}`);
+
+        const artistId = await fetchArtistId(artistName);
+        if (!artistId) throw new Error('Artist not found.');
+
+        lastArtistTracks = await fetchTopTracks(artistId);
+        if (lastArtistTracks.length === 0) throw new Error('No top tracks found.');
+
+        // Update the cached artist
+        previousArtist = artistName;
+    }
+
+    await tryFetchLyricsFromTracks(lastArtistTracks);
+}
+
+async function handleSongSearch(songName) {
+    const cacheKey = songName.toLowerCase().trim();
+
+    if (cachedSongLyrics[cacheKey]) {
+        console.log(`Using cached lyrics for: ${songName}`);
+        originalText = extractRandomSection(cachedSongLyrics[cacheKey]);
+        updateDisplayedText();
+        endGameBtn.style.display = 'inline-block';
+
+        if (!selectedTrack) {
+            selectedTrack = {
+                title: songName,
+                artist: { name: previousArtist || 'Unknown Artist' },
+                album: { cover_medium: '/path/to/default-cover.jpg' }, // Provide a default cover image
+            };
+        }
+
+        return; 
+    }
+
+    console.log(`Fetching lyrics for new song: ${songName}`);
+
+    try {
+        const response = await fetch(`/tracks?artist=${encodeURIComponent(songName)}`);
+        const data = await response.json();
+
+        if (data.data.length === 0) throw new Error('No matching tracks found for the song.');
+
+        const topResult = data.data[0];
+        const likelyArtist = topResult.artist.name;
+        const trackTitle = topResult.title;
+
+        console.log(`Top result: ${trackTitle} by ${likelyArtist}`);
+
+        const lyrics = await fetchLyrics(likelyArtist, trackTitle);
+        cachedSongLyrics[cacheKey] = lyrics;
+
+        // Update selectedTrack with the full topResult
+        selectedTrack = topResult;
+
+        previousArtist = likelyArtist;
+        originalText = extractRandomSection(lyrics);
+        updateDisplayedText();
+        endGameBtn.style.display = 'inline-block';
+    } catch (error) {
+        throw new Error(`Lyrics not found for the song: ${songName}`);
+    }
+}
+
+async function tryFetchLyricsFromTracks(tracks) {
+    const triedTracks = new Set();
+    let lyrics = null;
+
+    while (!lyrics && triedTracks.size < tracks.length) {
+        
+        const randomIndex = Math.floor(Math.random() * tracks.length);
+        if (triedTracks.has(randomIndex)) continue;
+
+        triedTracks.add(randomIndex);
+        const track = tracks[randomIndex];
+        // console.log(`Trying track: ${track.title} by ${track.artist.name}`);
+
+        try {
+            lyrics = await fetchLyrics(track.artist.name, track.title);
+            selectedTrack = tracks[randomIndex];
+        } catch (error) {
+            console.warn(`Lyrics not found for track: ${track.title}`);
+        }
+    }
+
+    if (!lyrics) {
+        throw new Error('Failed to fetch lyrics for any track.');
+    }
+
+    originalText = extractRandomSection(lyrics);
+    updateDisplayedText();
+    endGameBtn.style.display = 'inline-block';
+}

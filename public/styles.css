@@ -28,7 +28,7 @@ h1 {
 .input-section {
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: left;
     gap: 10px;
     margin-bottom: 20px;
 }
@@ -44,11 +44,12 @@ h1 {
 }
 
 #artist-input {
-    width: 46.5%;
+    width: 40%;
+    height: 22.67px;
 }
 
 #search-type {
-    width: 15%;
+    width: 20%;
 }
 
 #artist-input::placeholder {
@@ -58,6 +59,7 @@ h1 {
 #start-btn {
     padding: 10px 20px;
     font-size: 18px;
+    height: 44px;
     color: #fff;
     background-color: #2E3A4E;
     border: none;
@@ -191,7 +193,7 @@ h1 {
 
 .guess-input-container {
     display: flex;
-    align-items: center;
+    align-items: left;
     gap: 10px;
     margin-top: 10px;
 }
@@ -206,6 +208,7 @@ h1 {
     background-color: #444;
     color: #fff;
     resize: none;
+    height: 22.67px;
 }
 
 #guess-input::placeholder {
@@ -215,7 +218,7 @@ h1 {
 #give-up {
     padding: 10px 20px;
     font-size: 18px;
-    height: 40px;
+    height: 44px;
     color: #fff;
     background-color: #dc3545;
     border: none;
@@ -224,6 +227,7 @@ h1 {
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 20%;
 }
 
 #give-up:hover {
