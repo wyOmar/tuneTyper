@@ -83,33 +83,43 @@ async function fetchTopTracks(artistId) {
 // Utility Functions
 function extractRandomSection(text, minLength = 150, maxLength = 300) {
     const lines = text.split('\n').filter(line => line.trim());
-    let selectedText = '';
-    let totalLength = 0;
+    if (lines.length === 0) return '';
 
-    let startIndex = Math.floor(Math.random() * lines.length);
+    for (let attempt = 0; attempt < 5; attempt++) {
+        let selectedText = '';
+        let totalLength = 0;
+        let startIndex = Math.floor(Math.random() * lines.length);
 
-    while (totalLength < minLength && startIndex >= 0) {
-        const line = lines[startIndex].trim();
-        if (line) {
-            selectedText = line + ' ' + selectedText;
-            totalLength = selectedText.length;
+        let index = startIndex;
+        while (totalLength < minLength && index < lines.length) {
+            const line = lines[index].trim();
+            if (line) {
+                selectedText += (selectedText ? ' ' : '') + line;
+                totalLength = selectedText.length;
+            }
+            index++;
         }
-        startIndex--;
+
+        if (totalLength >= minLength) {
+            
+            if (totalLength > maxLength) {
+                selectedText = selectedText.slice(0, maxLength);
+                const lastSpace = selectedText.lastIndexOf(' ');
+                const lastSentenceEnd = selectedText.lastIndexOf('.');
+                const cutIndex = Math.max(lastSentenceEnd, lastSpace);
+
+                if (cutIndex > 0) {
+                    selectedText = selectedText.slice(0, cutIndex).trim();
+                }
+            }
+            return selectedText.trim();
+        }
     }
 
-    if (totalLength > maxLength) {
-        selectedText = selectedText.slice(0, maxLength);
-
-        const lastSpace = selectedText.lastIndexOf(' ');
-        const lastSentenceEnd = selectedText.lastIndexOf('.');
-        const cutIndex = Math.max(lastSentenceEnd, lastSpace);
-
-        if (cutIndex > 0) {
-            selectedText = selectedText.slice(0, cutIndex).trim();
-        }
-    }
-
-    return selectedText.trim();
+    // If all attempts fail, return the longest possible section
+    console.log(`failed`)
+    return lines.join(' ').slice(0, maxLength).trim();
+    
 }
 
 function normalizeTextForTyping(text, removePunctuation = false, removeAdlibs = false) {
@@ -119,7 +129,7 @@ function normalizeTextForTyping(text, removePunctuation = false, removeAdlibs = 
     text = text.replace(/[\u2018\u2019\u201A\u201B]/g, "'")
                .replace(/[\u201C\u201D\u201E\u201F]/g, '"');
     if (removeAdlibs) {
-        text = text.replace(/\(\s*[^()]{1,15}\s*\)/g, '');
+        text = text.replace(/\(\s*[^()]{1,25}\s*\)/g, '');
     }
     if (removePunctuation) {
         text = text.replace(/[\p{P}\p{S}]/gu, '').toLowerCase();
@@ -397,7 +407,7 @@ async function handleSongSearch(songName) {
             selectedTrack = {
                 title: songName,
                 artist: { name: previousArtist || 'Unknown Artist' },
-                album: { cover_medium: '/path/to/default-cover.jpg' }, // Provide a default cover image
+                album: { cover_medium: '/placeholder.jpg' },
             };
         }
 
@@ -421,7 +431,6 @@ async function handleSongSearch(songName) {
         const lyrics = await fetchLyrics(likelyArtist, trackTitle);
         cachedSongLyrics[cacheKey] = lyrics;
 
-        // Update selectedTrack with the full topResult
         selectedTrack = topResult;
 
         previousArtist = likelyArtist;
@@ -444,8 +453,8 @@ async function tryFetchLyricsFromTracks(tracks) {
 
         triedTracks.add(randomIndex);
         const track = tracks[randomIndex];
-        // console.log(`Trying track: ${track.title} by ${track.artist.name}`);
-
+        console.log(`Trying track: x by ${track.artist.name}`);
+        // ${track.title}
         try {
             lyrics = await fetchLyrics(track.artist.name, track.title);
             selectedTrack = tracks[randomIndex];
