@@ -22,11 +22,11 @@ let startTime = null;
 let testStarted = false;
 let selectedTrack = null;
 let guessCount = 0;
-let hasShownHint = false;
 let previousArtist = "";
 let lastQueriedArtist = null;
 let lastArtistTracks = [];
 let cachedSongLyrics = {};
+let fullLyrics = "";
 
 // API Fetch Functions
 async function fetchTracks(query) {
@@ -156,7 +156,6 @@ function resetGame() {
     currentWordIndex = 0;
     startTime = null;
     testStarted = false;
-    hasShownHint = false;
     guessCount = 0;
 
     typingArea.value = '';
@@ -220,11 +219,12 @@ function handleGuess() {
         showFinalInfo();
 
     } else {
-        if (!hasShownHint) {
-            hasShownHint = true;
+        if (guessCount >= 1) {
             guessFeedback.innerHTML = '<span style="color: red;">Wrong! Hint:</span>';
             songInfo.innerHTML = `<img id="album-image" src="${selectedTrack.album.cover_medium}" alt="${selectedTrack.album.title}">`;
             giveUpButton.style.display = 'block';
+
+
         } else {
             guessFeedback.innerHTML = '<span style="color: red;">Wrong again!</span>';
         }
@@ -232,23 +232,34 @@ function handleGuess() {
 }
 
 function showFinalInfo() {
-    const searchType = searchTypeDropdown.value;
+    
 
     let infoHTML = `
-        <h3>${selectedTrack.title} by ${selectedTrack.artist.name}</h3>
-        <img id="album-image" src="${selectedTrack.album.cover_medium}" alt="${selectedTrack.album.title}">
-        <audio id="song-preview" controls autoplay>
-            <source src="${selectedTrack.preview}" type="audio/mpeg">
-            Audio element error
-        </audio>
-    `;
+         <div style="display: flex; align-items: flex-start;">
+            <!-- Album Art Section -->
+            <div style="flex-shrink: 0; margin-right: 20px;">
+                <h3>${selectedTrack.title} <br> ${selectedTrack.artist.name}</h3>
+                <img id="album-image" src="${selectedTrack.album.cover_medium}" alt="${selectedTrack.album.title}">
+                <audio id="song-preview" controls autoplay>
+                    <source src="${selectedTrack.preview}" type="audio/mpeg">
+                    Your browser does not support the audio element.
+                </audio>
+            </div>
 
-    if (searchType !== "song") {
-        infoHTML = `
-            <p><strong>Guesses:</strong> ${guessCount}</p>
-            ${infoHTML}
-        `;
-    }
+            <!-- Lyrics Section -->
+            <div class="lyrics-box">
+                <p id="display-lyrics" class="display-lyrics">${fullLyrics.replace(/\r/g, '\n').replace(/\n\n/g, '<br>')}</p>
+            </div>
+        </div>
+    `;
+    //const searchType = searchTypeDropdown.value;
+    //${completeLyrics.replace(/\n/g, '<br>')}
+    // if (searchType !== "song") {
+    //     infoHTML = `
+    //         <p><strong>Guesses:</strong> ${guessCount}</p>
+    //         ${infoHTML}
+    //     `;
+    // }
 
     songInfo.innerHTML = infoHTML;
     guessSection.style.display = 'none';
@@ -271,7 +282,8 @@ function endGame() {
 
     typingArea.disabled = true;
     typingArea.style.display = 'none';
-    wpmResult.textContent = `Final WPM: ${calculateWPM()}`;
+    wpmResult.textContent = `${calculateWPM()} WPM`;
+    //Final WPM
     guessSection.style.display = 'none';
     endGameBtn.style.display = 'none';
 
@@ -315,7 +327,8 @@ typingArea.addEventListener('input', () => {
         typingArea.classList.remove('incorrect');
     }
 
-    wpmResult.textContent = `Current WPM: ${calculateWPM()}`;
+    wpmResult.textContent = `${calculateWPM()}`;
+    //CurrentWPM
 });
 
 guessInput.addEventListener('keydown', (event) => {
@@ -400,6 +413,7 @@ async function handleSongSearch(songName) {
     if (cachedSongLyrics[cacheKey]) {
         console.log(`Using cached lyrics for: ${songName}`);
         originalText = extractRandomSection(cachedSongLyrics[cacheKey]);
+        fullLyrics = cachedSongLyrics[cacheKey]
         updateDisplayedText();
         endGameBtn.style.display = 'inline-block';
 
@@ -429,6 +443,7 @@ async function handleSongSearch(songName) {
         console.log(`Top result: ${trackTitle} by ${likelyArtist}`);
 
         const lyrics = await fetchLyrics(likelyArtist, trackTitle);
+        fullLyrics = lyrics;
         cachedSongLyrics[cacheKey] = lyrics;
 
         selectedTrack = topResult;
@@ -458,6 +473,7 @@ async function tryFetchLyricsFromTracks(tracks) {
         try {
             lyrics = await fetchLyrics(track.artist.name, track.title);
             selectedTrack = tracks[randomIndex];
+            fullLyrics = lyrics;
         } catch (error) {
             console.warn(`Lyrics not found for track: ${track.title}`);
         }
@@ -471,3 +487,4 @@ async function tryFetchLyricsFromTracks(tracks) {
     updateDisplayedText();
     endGameBtn.style.display = 'inline-block';
 }
+

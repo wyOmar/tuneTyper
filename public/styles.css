@@ -81,9 +81,9 @@ h1 {
 }
 
 /* Game Section */
-.game-section {
+/* .game-section {
     margin-bottom: 20px;
-}
+} */
 
 .text-display {
     font-size: 18px;
@@ -121,7 +121,6 @@ h1 {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-top: 10px;
 }
 
 #typing-area {
@@ -134,6 +133,8 @@ h1 {
     background-color: #333;
     color: #fff;
     resize: none;
+    margin-bottom:15px;
+    margin-top:5px;
 }
 
 #typing-area.incorrect {
@@ -161,23 +162,23 @@ h1 {
     background-color: #b52a37;
 }
 
-/* Result and Song Info */
-.result-text, .song-info p, .song-info h3 {
+
+.result-text, .song-info h3 {
     font-size: 20px;
-    font-weight: 600;
     font-family: Arial, sans-serif;
     margin: 10px 0;
     text-align: center;
     color: #fff;
+    max-width: 250px;
 }
 
-.song-info h3 {
-    font-size: 22px;
-}
-
-.result-text {
-    margin-bottom: 10px;
+.wpmresult-text {
     color: #4caf50;
+    font-size: 30px;
+    font-family: monospace;
+    margin-top: 0px;
+    margin-bottom:0px;
+    
 }
 
 /* Guess Section */
@@ -275,4 +276,23 @@ h1 {
 .navbar-title {
     font-size: 1.8rem; 
     margin: 0; 
+}
+
+.lyrics-box {
+    flex: 1; 
+    max-height: 300px; 
+    font-family: Arial, sans-serif; 
+    font-size: 18px;
+    background: #2a2a2a;
+    padding: 10px;
+    border-radius: 5px;
+    border: 1px solid #333;
+    margin-bottom: 15px;
+    overflow-y: auto;
+    line-height: 1.5;
+    scrollbar-width: none; 
+    -ms-overflow-style: none; 
+}
+.lyrics-box::-webkit-scrollbar {
+    display: none;
 }
