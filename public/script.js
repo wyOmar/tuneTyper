@@ -15,7 +15,7 @@ const searchTypeDropdown = document.getElementById('search-type');
 const endGameBtn = document.getElementById('end-game-btn');
 
 // Variables
-let originalText = "";
+let typeSection = "";
 let processedWords = [];
 let currentWordIndex = 0;
 let startTime = null;
@@ -23,24 +23,15 @@ let testStarted = false;
 let selectedTrack = null;
 let guessCount = 0;
 let previousArtist = "";
-let lastQueriedArtist = null;
-let lastArtistTracks = [];
+let artistTracks = [];
 let cachedSongLyrics = {};
-let fullLyrics = "";
+//START
+
+let sectionOne = "";
+let sectionTwo = "";
+let sectionSelected = "";
 
 // API Fetch Functions
-async function fetchTracks(query) {
-    const searchType = searchTypeDropdown.value;
-    const response = await fetch(`/tracks?artist=${encodeURIComponent(query)}`);
-    if (!response.ok) throw new Error('Failed to fetch tracks.');
-    const data = await response.json();
-
-    if (searchType === "song") {
-        return data.data.filter(track => normalizeText(track.title).includes(normalizeText(query)));
-    }
-    return data.data;
-}
-
 async function fetchLyrics(artist, track) {
     const response = await fetch(`/lyrics?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`);
     if (!response.ok) throw new Error('Lyrics not found.');
@@ -82,7 +73,7 @@ async function fetchTopTracks(artistId) {
 
 // Utility Functions
 function extractRandomSection(text, minLength = 150, maxLength = 300) {
-    const lines = text.split('\n').filter(line => line.trim());
+    const lines = text.split(/\n/);
     if (lines.length === 0) return '';
 
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -92,16 +83,13 @@ function extractRandomSection(text, minLength = 150, maxLength = 300) {
 
         let index = startIndex;
         while (totalLength < minLength && index < lines.length) {
-            const line = lines[index].trim();
-            if (line) {
-                selectedText += (selectedText ? ' ' : '') + line;
-                totalLength = selectedText.length;
-            }
+            const line = lines[index]; 
+            selectedText += (selectedText ? '\n' : '') + line;
+            totalLength = selectedText.length;
             index++;
         }
 
         if (totalLength >= minLength) {
-            
             if (totalLength > maxLength) {
                 selectedText = selectedText.slice(0, maxLength);
                 const lastSpace = selectedText.lastIndexOf(' ');
@@ -112,14 +100,21 @@ function extractRandomSection(text, minLength = 150, maxLength = 300) {
                     selectedText = selectedText.slice(0, cutIndex).trim();
                 }
             }
+            sectionOne = lines.slice(0, startIndex).join('\n'); 
+            sectionTwo = lines.slice(index).join('\n');
+            sectionSelected = selectedText.trim();
+            // console.log("Selected Section:", selectedText);
+            // console.log("Section One (Before):", sectionOne);
+            // console.log("Section Two (After):", sectionTwo);
+
             return selectedText.trim();
         }
     }
-
     // If all attempts fail, return the longest possible section
-    console.log(`failed`)
-    return lines.join(' ').slice(0, maxLength).trim();
-    
+    console.log(`Extract random section requirements failed`);
+    sectionOne = '';
+    sectionTwo = '';
+    return lines.join('\n').slice(0, maxLength).trim();
 }
 
 function normalizeTextForTyping(text, removePunctuation = false, removeAdlibs = false) {
@@ -157,6 +152,10 @@ function resetGame() {
     startTime = null;
     testStarted = false;
     guessCount = 0;
+    sectionOne = "";
+    sectionTwo = "";
+    sectionSelected = "";
+
 
     typingArea.value = '';
     typingArea.style.display = 'block';
@@ -176,7 +175,7 @@ function resetGame() {
 function updateDisplayedText() {
     const removePunctuation = !removePunctuationCheckbox.checked;
     const removeAdlibs = !removeAdlibsCheckbox.checked;
-    const textToDisplay = normalizeTextForTyping(originalText, removePunctuation, removeAdlibs);
+    const textToDisplay = normalizeTextForTyping(typeSection, removePunctuation, removeAdlibs);
     processedWords = textToDisplay.split(/\s+/).filter(Boolean);
 
     displayText.innerHTML = processedWords
@@ -215,7 +214,6 @@ function handleGuess() {
     guessCount++;
 
     if (userGuess === correctAnswer) {
-        guessFeedback.innerHTML = '<span style="color: green;"></span>';
         showFinalInfo();
 
     } else {
@@ -223,8 +221,6 @@ function handleGuess() {
             guessFeedback.innerHTML = '<span style="color: red;">Wrong! Hint:</span>';
             songInfo.innerHTML = `<img id="album-image" src="${selectedTrack.album.cover_medium}" alt="${selectedTrack.album.title}">`;
             giveUpButton.style.display = 'block';
-
-
         } else {
             guessFeedback.innerHTML = '<span style="color: red;">Wrong again!</span>';
         }
@@ -248,18 +244,14 @@ function showFinalInfo() {
 
             <!-- Lyrics Section -->
             <div class="lyrics-box">
-                <p id="display-lyrics" class="display-lyrics">${fullLyrics.replace(/\r/g, '\n').replace(/\n\n/g, '<br>')}</p>
+            <p id="display-lyrics" class="display-lyrics">
+                ${sectionOne.replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>')}
+                <div class="selectedLyrics">${sectionSelected.replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>')}</div>
+                ${sectionTwo.replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>')}
+            </p>
             </div>
         </div>
     `;
-    //const searchType = searchTypeDropdown.value;
-    //${completeLyrics.replace(/\n/g, '<br>')}
-    // if (searchType !== "song") {
-    //     infoHTML = `
-    //         <p><strong>Guesses:</strong> ${guessCount}</p>
-    //         ${infoHTML}
-    //     `;
-    // }
 
     songInfo.innerHTML = infoHTML;
     guessSection.style.display = 'none';
@@ -272,14 +264,11 @@ function showFinalInfo() {
 }
 
 function giveUp() {
-    guessFeedback.innerHTML = `<span style="color: orange;">The correct answer was: ${selectedTrack.title}</span>`;
-    guessCount = "Revealed";
     showFinalInfo();
 }
+giveUpButton.addEventListener('click', giveUp);
 
 function endGame() {
-    if (!testStarted) return;
-
     typingArea.disabled = true;
     typingArea.style.display = 'none';
     wpmResult.textContent = `${calculateWPM()} WPM`;
@@ -338,8 +327,6 @@ guessInput.addEventListener('keydown', (event) => {
     }
 });
 
-giveUpButton.addEventListener('click', giveUp);
-
 removePunctuationCheckbox.addEventListener('change', () => {
     if (!testStarted) updateDisplayedText();
 });
@@ -389,7 +376,7 @@ endGameBtn.addEventListener('click', () => {
 
 // Button Logic
 async function handleArtistSearch(artistName) {
-    if (artistName === previousArtist && lastArtistTracks.length > 0) {
+    if (artistName === previousArtist && artistTracks.length > 0) {
         console.log(`Using cached tracks for artist: ${artistName}`);
     } else {
         console.log(`Fetching tracks for new artist: ${artistName}`);
@@ -397,14 +384,14 @@ async function handleArtistSearch(artistName) {
         const artistId = await fetchArtistId(artistName);
         if (!artistId) throw new Error('Artist not found.');
 
-        lastArtistTracks = await fetchTopTracks(artistId);
-        if (lastArtistTracks.length === 0) throw new Error('No top tracks found.');
+        artistTracks = await fetchTopTracks(artistId);
+        if (artistTracks.length === 0) throw new Error('No top tracks found.');
 
         // Update the cached artist
         previousArtist = artistName;
     }
 
-    await tryFetchLyricsFromTracks(lastArtistTracks);
+    await tryFetchLyricsFromTracks(artistTracks);
 }
 
 async function handleSongSearch(songName) {
@@ -412,18 +399,9 @@ async function handleSongSearch(songName) {
 
     if (cachedSongLyrics[cacheKey]) {
         console.log(`Using cached lyrics for: ${songName}`);
-        originalText = extractRandomSection(cachedSongLyrics[cacheKey]);
-        fullLyrics = cachedSongLyrics[cacheKey]
+        typeSection = extractRandomSection(cachedSongLyrics[cacheKey]);
         updateDisplayedText();
         endGameBtn.style.display = 'inline-block';
-
-        if (!selectedTrack) {
-            selectedTrack = {
-                title: songName,
-                artist: { name: previousArtist || 'Unknown Artist' },
-                album: { cover_medium: '/placeholder.jpg' },
-            };
-        }
 
         return; 
     }
@@ -436,20 +414,19 @@ async function handleSongSearch(songName) {
 
         if (data.data.length === 0) throw new Error('No matching tracks found for the song.');
 
-        const topResult = data.data[0];
-        const likelyArtist = topResult.artist.name;
-        const trackTitle = topResult.title;
+        const topSearchResult = data.data[0];
+        const trackArtist = topSearchResult.artist.name;
+        const trackTitle = topSearchResult.title;
 
-        console.log(`Top result: ${trackTitle} by ${likelyArtist}`);
+        console.log(`Top result: ${trackTitle} by ${trackArtist}`);
 
-        const lyrics = await fetchLyrics(likelyArtist, trackTitle);
-        fullLyrics = lyrics;
+        const lyrics = await fetchLyrics(trackArtist, trackTitle);
         cachedSongLyrics[cacheKey] = lyrics;
 
-        selectedTrack = topResult;
+        selectedTrack = topSearchResult;
 
-        previousArtist = likelyArtist;
-        originalText = extractRandomSection(lyrics);
+        previousArtist = trackArtist;
+        typeSection = extractRandomSection(lyrics);
         updateDisplayedText();
         endGameBtn.style.display = 'inline-block';
     } catch (error) {
@@ -468,12 +445,10 @@ async function tryFetchLyricsFromTracks(tracks) {
 
         triedTracks.add(randomIndex);
         const track = tracks[randomIndex];
-        console.log(`Trying track: x by ${track.artist.name}`);
-        // ${track.title}
+        console.log(`Trying track: {track.title} by ${track.artist.name}`);
         try {
             lyrics = await fetchLyrics(track.artist.name, track.title);
             selectedTrack = tracks[randomIndex];
-            fullLyrics = lyrics;
         } catch (error) {
             console.warn(`Lyrics not found for track: ${track.title}`);
         }
@@ -483,8 +458,7 @@ async function tryFetchLyricsFromTracks(tracks) {
         throw new Error('Failed to fetch lyrics for any track.');
     }
 
-    originalText = extractRandomSection(lyrics);
+    typeSection = extractRandomSection(lyrics);
     updateDisplayedText();
     endGameBtn.style.display = 'inline-block';
 }
-

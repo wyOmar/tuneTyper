@@ -60,15 +60,15 @@ h1 {
     padding: 10px 20px;
     font-size: 18px;
     height: 44px;
-    color: #fff;
-    background-color: #2E3A4E;
+    color: black;
+    background-color: #d1d1d1;
     border: none;
     border-radius: 5px;
     cursor: pointer;
 }
 
 #start-btn:hover {
-    background-color: #4A617D;
+    background-color: #a8a8a8;
 }
 
 /* Checkbox Label */
@@ -109,7 +109,7 @@ h1 {
 }
 
 .text-display .correct {
-    color: #4caf50;
+    color: green;
 }
 
 .text-display .incorrect {
@@ -173,7 +173,7 @@ h1 {
 }
 
 .wpmresult-text {
-    color: #4caf50;
+    color: green;
     font-size: 30px;
     font-family: monospace;
     margin-top: 0px;
@@ -295,4 +295,13 @@ h1 {
 }
 .lyrics-box::-webkit-scrollbar {
     display: none;
+}
+
+.lyrics-box p {
+    margin-bottom: 0px;
+    margin-top: 0px;
+}
+
+.selectedLyrics{
+    color:green;
 }
