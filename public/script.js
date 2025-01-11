@@ -25,15 +25,17 @@ let guessCount = 0;
 let previousArtist = "";
 let artistTracks = [];
 let cachedSongLyrics = {};
-//START
-
+let wpmInterval;
+// Lyrics variables
 let sectionOne = "";
 let sectionTwo = "";
 let sectionSelected = "";
 
 // API Fetch Functions
 async function fetchLyrics(artist, track) {
+    startLoadingBar();
     const response = await fetch(`/lyrics?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`);
+    stopLoadingBar();
     if (!response.ok) throw new Error('Lyrics not found.');
     const data = await response.json();
     if (!data.lyrics) throw new Error('Lyrics unavailable.');
@@ -207,28 +209,74 @@ function calculateWPM() {
     return Math.round((currentWordIndex / elapsedTime) * 60);
 }
 
+function startWPMUpdater() {
+    wpmInterval = setInterval(() => {
+        wpmResult.textContent = `${calculateWPM()} WPM`;
+    }, 2000);
+}
+
+function stopWPMUpdater() {
+    clearInterval(wpmInterval);
+}
+
 function handleGuess() {
     const userGuess = normalizeText(guessInput.value);
-    const correctAnswer = normalizeText(selectedTrack.title);
+    const correctAnswerOriginal = selectedTrack.title;
+
+    const correctAnswerProcessed = removeParentheses(correctAnswerOriginal);
+    const correctAnswer = normalizeText(correctAnswerProcessed);
 
     guessCount++;
 
     if (userGuess === correctAnswer) {
         showFinalInfo();
-
     } else {
+        const partialHint = getPartialMatchHint(userGuess, correctAnswerProcessed);
+
         if (guessCount >= 1) {
-            guessFeedback.innerHTML = '<span style="color: red;">Wrong! Hint:</span>';
+            guessFeedback.innerHTML = `
+                <span style="color: red;">Wrong! Hint:</span><br>
+                <span style="font-size: 1.2em;">${partialHint}</span>
+            `;
             songInfo.innerHTML = `<img id="album-image" src="${selectedTrack.album.cover_medium}" alt="${selectedTrack.album.title}">`;
             giveUpButton.style.display = 'block';
         } else {
-            guessFeedback.innerHTML = '<span style="color: red;">Wrong again!</span>';
+            guessFeedback.innerHTML = `<span style="color: red;">Wrong again! Hint: ${partialHint}</span>`;
         }
     }
 }
 
+function getPartialMatchHint(userGuess, correctAnswer) {
+
+    const userGuessNorm = userGuess.toLowerCase();
+    const correctAnswerNorm = correctAnswer.toLowerCase();
+    const length = correctAnswer.length;
+    let hint = '';
+
+    for (let i = 0; i < length; i++) {
+        const correctChar = correctAnswer[i];
+        if (correctChar === ' ') {
+            hint += ' ';
+        } else {
+            const guessChar = (i < userGuessNorm.length) ? userGuessNorm[i] : '';
+
+            if (guessChar === correctChar.toLowerCase()) {
+                hint += correctChar;
+            } else {
+                hint += '_';
+            }
+        }
+    }
+
+    return hint;
+}
+
+function removeParentheses(str) {
+    return str.replace(/\(.*?\)/g, '').trimEnd() + ' ';
+
+}
+
 function showFinalInfo() {
-    
 
     let infoHTML = `
          <div style="display: flex; align-items: flex-start;">
@@ -236,7 +284,7 @@ function showFinalInfo() {
             <div style="flex-shrink: 0; margin-right: 20px;">
                 <h3>${selectedTrack.title} <br> ${selectedTrack.artist.name}</h3>
                 <img id="album-image" src="${selectedTrack.album.cover_medium}" alt="${selectedTrack.album.title}">
-                <audio id="song-preview" controls autoplay>
+                <audio id="song-preview" controls>
                     <source src="${selectedTrack.preview}" type="audio/mpeg">
                     Your browser does not support the audio element.
                 </audio>
@@ -269,6 +317,7 @@ function giveUp() {
 giveUpButton.addEventListener('click', giveUp);
 
 function endGame() {
+    stopWPMUpdater();
     typingArea.disabled = true;
     typingArea.style.display = 'none';
     wpmResult.textContent = `${calculateWPM()} WPM`;
@@ -286,6 +335,15 @@ function endGame() {
 }
 
 // Event Listeners
+
+document.addEventListener('keydown', (event) => {
+    // Shift + Enter to restart the game
+    if (event.key === 'Enter' && event.shiftKey && typingArea.disabled) {
+        event.preventDefault();
+        startBtn.click();  // Restart the game
+    }
+});
+
 typingArea.addEventListener('input', () => {
     if (!startTime) {
         startTime = new Date();
@@ -293,6 +351,7 @@ typingArea.addEventListener('input', () => {
         removePunctuationCheckbox.disabled = true;
         removeAdlibsCheckbox.disabled = true;
         searchTypeDropdown.disabled = true;
+        startWPMUpdater();
     }
 
     const typedText = typingArea.value.trim();
@@ -316,8 +375,8 @@ typingArea.addEventListener('input', () => {
         typingArea.classList.remove('incorrect');
     }
 
-    wpmResult.textContent = `${calculateWPM()}`;
-    //CurrentWPM
+    // wpmResult.textContent = `${calculateWPM()}`;
+    // //CurrentWPM
 });
 
 guessInput.addEventListener('keydown', (event) => {
@@ -325,6 +384,8 @@ guessInput.addEventListener('keydown', (event) => {
         event.preventDefault();
         handleGuess();
     }
+
+    
 });
 
 removePunctuationCheckbox.addEventListener('change', () => {
@@ -338,6 +399,10 @@ removeAdlibsCheckbox.addEventListener('change', () => {
 startBtn.addEventListener('click', async () => {
     const inputValue = artistInput.value.trim();
     const searchType = searchTypeDropdown.value; // "Artist","Song"
+
+    if (searchType !== 'artist' && searchType !== 'song') {
+        searchType = 'artist'; // default
+    }
 
     if (!inputValue) {
         alert('Please enter a valid input.');
@@ -372,6 +437,10 @@ artistInput.addEventListener('keydown', function(event) {
 endGameBtn.addEventListener('click', () => {
     endGame();
     searchTypeDropdown.disabled = false;
+});
+
+window.addEventListener('DOMContentLoaded', () => {
+    artistInput.focus();
 });
 
 // Button Logic
@@ -461,4 +530,50 @@ async function tryFetchLyricsFromTracks(tracks) {
     typeSection = extractRandomSection(lyrics);
     updateDisplayedText();
     endGameBtn.style.display = 'inline-block';
+}
+
+// Loading Bar
+const loadingBarContainer = document.createElement('div');
+loadingBarContainer.id = 'loading-bar-container';
+loadingBarContainer.style.position = 'fixed';
+loadingBarContainer.style.top = '0';
+loadingBarContainer.style.left = '0';
+loadingBarContainer.style.width = '100%';
+loadingBarContainer.style.height = '4px';
+loadingBarContainer.style.backgroundColor = '#333';
+loadingBarContainer.style.zIndex = '1000';
+
+const loadingBar = document.createElement('div');
+loadingBar.id = 'loading-bar';
+loadingBar.style.width = '0%';
+loadingBar.style.height = '100%';
+loadingBar.style.backgroundColor = '#4caf50';
+loadingBar.style.transition = 'width 0.3s ease-in-out';
+
+loadingBarContainer.appendChild(loadingBar);
+document.body.prepend(loadingBarContainer);
+
+
+// Loading Bar Logic
+let loadingInterval;
+function startLoadingBar() {
+    loadingBar.style.width = '5%';
+    let progress = 5;
+
+    loadingInterval = setInterval(() => {
+        if (progress < 65) {
+            progress += 10;
+        } else if (progress < 95) {
+            progress += 5;
+        }
+        loadingBar.style.width = progress + '%';
+    }, 1000);
+}
+
+function stopLoadingBar() {
+    clearInterval(loadingInterval);
+    loadingBar.style.width = '100%';
+    setTimeout(() => {
+        loadingBar.style.width = '0%';
+    }, 500);
 }
