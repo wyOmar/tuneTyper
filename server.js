@@ -42,6 +42,16 @@ app.get('/top-tracks', async (req, res) => {
     }
 });
 
+app.get('/default', async (req, res) => {
+    try {
+        const response = await axios.get(`https://api.deezer.com/playlist/2868476282`);
+        res.json(response.data);
+    } catch (error) {
+        console.error('Error fetching tracks:', error.message);
+        res.status(500).send('Failed to fetch tracks.');
+    }
+});
+
 
 // OVH Lyrics API Route
 app.get('/lyrics', async (req, res) => {

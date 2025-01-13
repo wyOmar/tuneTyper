@@ -73,6 +73,40 @@ async function fetchTopTracks(artistId) {
     return data.data;
 }
 
+async function loadDefaultPlaylist() {
+    try {
+        // Fetch playlist data from Deezer API
+        const response = await fetch('/default');
+        if (!response.ok) throw new Error('Failed to fetch playlist data.');
+
+        const data = await response.json();
+        const tracks = data.tracks.data;
+
+        if (tracks.length === 0) throw new Error('No tracks found in the playlist.');
+
+        // Select a random song from the playlist
+        const randomTrack = tracks[Math.floor(Math.random() * tracks.length)];
+        const trackArtist = randomTrack.artist.name;
+        const trackTitle = randomTrack.title;
+
+        console.log(`Selected Song: ${trackTitle} by ${trackArtist}`);
+
+        // Fetch lyrics and start the game
+        const lyrics = await fetchLyrics(trackArtist, trackTitle);
+        cachedSongLyrics[`${trackArtist}-${trackTitle}`] = lyrics;
+
+        selectedTrack = randomTrack;
+        typeSection = extractRandomSection(lyrics);
+        updateDisplayedText();
+        endGameBtn.style.display = 'inline-block';
+
+
+    } catch (error) {
+        
+        console.error(error.message);
+    }
+}
+
 // Utility Functions
 function extractRandomSection(text, minLength = 150, maxLength = 300) {
     const lines = text.split(/\n/);
@@ -442,6 +476,7 @@ endGameBtn.addEventListener('click', () => {
 window.addEventListener('DOMContentLoaded', () => {
     artistInput.focus();
 });
+window.addEventListener('DOMContentLoaded', loadDefaultPlaylist);
 
 // Button Logic
 async function handleArtistSearch(artistName) {
