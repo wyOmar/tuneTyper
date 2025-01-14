@@ -501,6 +501,22 @@ endGameBtn.addEventListener('click', () => {
 
 window.addEventListener('DOMContentLoaded', () => {
     artistInput.focus();
+    const titleElement = document.querySelector('.navbar-title');
+    const titleText = 'TuneTyper';
+    let index = 0;
+
+    function typeNavbarTitle() {
+        if (index < titleText.length) {
+            titleElement.textContent += titleText.charAt(index);
+            index++;
+            setTimeout(typeNavbarTitle, 75);  
+        }
+    }
+
+    
+    titleElement.textContent = '';
+    typeNavbarTitle();
+
 });
 window.addEventListener('DOMContentLoaded', loadDefaultPlaylist);
 
