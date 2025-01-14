@@ -75,7 +75,6 @@ async function fetchTopTracks(artistId) {
 
 async function loadDefaultPlaylist() {
     try {
-        // Fetch playlist data from Deezer API
         const response = await fetch('/default');
         if (!response.ok) throw new Error('Failed to fetch playlist data.');
 
@@ -84,29 +83,45 @@ async function loadDefaultPlaylist() {
 
         if (tracks.length === 0) throw new Error('No tracks found in the playlist.');
 
-        // Select a random song from the playlist
-        const randomTrack = tracks[Math.floor(Math.random() * tracks.length)];
-        const trackArtist = randomTrack.artist.name;
-        const trackTitle = randomTrack.title;
+        const triedTracks = new Set();
+        let lyrics = null;
 
-        console.log(`Selected Song: ${trackTitle} by ${trackArtist}`);
+        while (triedTracks.size < tracks.length && !lyrics) {
+            const randomIndex = Math.floor(Math.random() * tracks.length);
+            if (triedTracks.has(randomIndex)) continue;
 
-        // Fetch lyrics and start the game
-        const lyrics = await fetchLyrics(trackArtist, trackTitle);
-        cachedSongLyrics[`${trackArtist}-${trackTitle}`] = lyrics;
+            triedTracks.add(randomIndex);
+            const randomTrack = tracks[randomIndex];
+            const trackArtist = randomTrack.artist.name;
+            const trackTitle = randomTrack.title;
 
-        selectedTrack = randomTrack;
-        typeSection = extractRandomSection(lyrics);
-        updateDisplayedText();
-        endGameBtn.style.display = 'inline-block';
+            
 
+            console.log(`Trying Song: ${trackTitle} by ${trackArtist}`);
 
+            try {
+                lyrics = await fetchLyrics(trackArtist, trackTitle);
+                await fakeTypePlaceholder(artistInput, `${trackArtist}`, 25);
+                cachedSongLyrics[`${trackArtist}-${trackTitle}`] = lyrics;
+
+                selectedTrack = randomTrack;
+                typeSection = extractRandomSection(lyrics);
+                updateDisplayedText();
+                endGameBtn.style.display = 'inline-block';
+
+                console.log(`Loaded lyrics for: ${trackTitle} by ${trackArtist}`);
+            } catch (error) {
+                console.warn(`Lyrics not found for: ${trackTitle} by ${trackArtist}. Trying another song...`);
+            }
+        }
+
+        if (!lyrics) {
+            throw new Error('No lyrics available for any track in the playlist.');
+        }
     } catch (error) {
-        
         console.error(error.message);
     }
 }
-
 // Utility Functions
 function extractRandomSection(text, minLength = 150, maxLength = 300) {
     const lines = text.split(/\n/);
@@ -180,6 +195,14 @@ function normalizeText(text) {
         .replace(/\(.*?\)/g, '')
         .replace(/[!"£$%^&*()\-+=_@:;#~[\]{},.<>?/]/g, '')
         .replace(/\s+/g, '');
+}
+
+async function fakeTypePlaceholder(element, text, speed = 100) {
+    element.placeholder = '';  // Clear placeholder
+    for (let i = 0; i < text.length; i++) {
+        element.placeholder += text.charAt(i);
+        await new Promise(resolve => setTimeout(resolve, speed));  // Typing delay
+    }
 }
 
 // Game Functions
@@ -433,13 +456,16 @@ removeAdlibsCheckbox.addEventListener('change', () => {
 startBtn.addEventListener('click', async () => {
     const inputValue = artistInput.value.trim();
     const searchType = searchTypeDropdown.value; // "Artist","Song"
+    stopWPMUpdater();
+    
 
     if (searchType !== 'artist' && searchType !== 'song') {
         searchType = 'artist'; // default
     }
 
     if (!inputValue) {
-        alert('Please enter a valid input.');
+        loadDefaultPlaylist();
+        resetGame();
         return;
     }
 
