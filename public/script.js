@@ -152,7 +152,8 @@ function extractRandomSection(text, minLength = 150, maxLength = 300) {
                 }
             }
             sectionOne = lines.slice(0, startIndex).join('\n'); 
-            sectionTwo = lines.slice(index).join('\n');
+            // Start sectionTwo right after the (possibly truncated) selection so no text is lost
+            sectionTwo = lines.slice(startIndex).join('\n').slice(selectedText.length).trim();
             sectionSelected = selectedText.trim();
             // console.log("Selected Section:", selectedText);
             // console.log("Section One (Before):", sectionOne);
@@ -165,15 +166,16 @@ function extractRandomSection(text, minLength = 150, maxLength = 300) {
     console.log(`Extract random section requirements failed`);
     sectionOne = '';
     sectionTwo = '';
-    return lines.join('\n').slice(0, maxLength).trim();
+    sectionSelected = lines.join('\n').slice(0, maxLength).trim();
+    return sectionSelected;
 }
 
 function normalizeTextForTyping(text, removePunctuation = false, removeAdlibs = false) {
     // The API being used for lyrics, ovh, sometimes returns lyrics with weird characters like that weird "e"
     text = text.normalize('NFKD').replace(/е/g, 'e');
-    text = text.normalize('NFKD').replace(/[^\x00-\x7F]/g, '');
     text = text.replace(/[\u2018\u2019\u201A\u201B]/g, "'")
                .replace(/[\u201C\u201D\u201E\u201F]/g, '"');
+    text = text.normalize('NFKD').replace(/[^\x00-\x7F]/g, '');
     if (removeAdlibs) {
         text = text.replace(/\(\s*[^()]{1,25}\s*\)/g, '');
     }
@@ -290,7 +292,7 @@ function handleGuess() {
     } else {
         const partialHint = getPartialMatchHint(userGuess, correctAnswerProcessed);
 
-        if (guessCount >= 1) {
+        if (guessCount === 1) {
             guessFeedback.innerHTML = `
                 <span style="color: red;">Wrong! Hint:</span><br>
                 <span style="font-size: 1.2em;">${partialHint}</span>
@@ -309,13 +311,14 @@ function getPartialMatchHint(userGuess, correctAnswer) {
     const correctAnswerNorm = correctAnswer.toLowerCase();
     const length = correctAnswer.length;
     let hint = '';
+    let j = 0; // index into the normalized guess, which has no spaces/punctuation
 
     for (let i = 0; i < length; i++) {
         const correctChar = correctAnswer[i];
         if (correctChar === ' ') {
             hint += ' ';
         } else {
-            const guessChar = (i < userGuessNorm.length) ? userGuessNorm[i] : '';
+            const guessChar = /[a-z0-9]/i.test(correctChar) ? (userGuessNorm[j++] || '') : correctChar.toLowerCase();
 
             if (guessChar === correctChar.toLowerCase()) {
                 hint += correctChar;
@@ -325,7 +328,7 @@ function getPartialMatchHint(userGuess, correctAnswer) {
         }
     }
 
-    return hint;
+    return hint.trimEnd();
 }
 
 function removeParentheses(str) {
@@ -571,7 +574,6 @@ async function handleSongSearch(songName) {
 
         selectedTrack = topSearchResult;
 
-        previousArtist = trackArtist;
         typeSection = extractRandomSection(lyrics);
         updateDisplayedText();
         endGameBtn.style.display = 'inline-block';
