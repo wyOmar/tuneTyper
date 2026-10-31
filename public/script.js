@@ -322,6 +322,82 @@ async function fakeTypePlaceholder(element, text, speed = 100) {
     }
 }
 
+let inputTypingSessionId = 0;
+let activeInputTypingTarget = null;
+let activeInputTypingElement = null;
+let activeInputTypingTimer = null;
+let activeInputTypingResolve = null;
+
+function cancelInputTyping(completeImmediately = false) {
+    inputTypingSessionId++;
+    if (activeInputTypingTimer) {
+        clearTimeout(activeInputTypingTimer);
+        activeInputTypingTimer = null;
+    }
+    if (completeImmediately && activeInputTypingElement && activeInputTypingTarget !== null) {
+        activeInputTypingElement.value = activeInputTypingTarget;
+    }
+    activeInputTypingTarget = null;
+    activeInputTypingElement = null;
+    if (activeInputTypingResolve) {
+        const resolveFn = activeInputTypingResolve;
+        activeInputTypingResolve = null;
+        resolveFn();
+    }
+}
+
+function fakeTypeValue(element, text, speed = 35) {
+    if (!element) return Promise.resolve();
+    cancelInputTyping(false);
+
+    const targetText = String(text ?? '');
+    const sessionId = ++inputTypingSessionId;
+    activeInputTypingElement = element;
+    activeInputTypingTarget = targetText;
+    element.value = '';
+
+    if (!targetText || speed <= 0) {
+        element.value = targetText;
+        activeInputTypingTarget = null;
+        activeInputTypingElement = null;
+        return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+        activeInputTypingResolve = resolve;
+        let index = 0;
+
+        function typeNextChar() {
+            if (sessionId !== inputTypingSessionId) {
+                if (activeInputTypingResolve === resolve) activeInputTypingResolve = null;
+                resolve();
+                return;
+            }
+            if (index < targetText.length) {
+                element.value += targetText.charAt(index);
+                index++;
+                if (index < targetText.length) {
+                    activeInputTypingTimer = setTimeout(typeNextChar, speed);
+                } else {
+                    activeInputTypingTimer = null;
+                    activeInputTypingTarget = null;
+                    activeInputTypingElement = null;
+                    if (activeInputTypingResolve === resolve) activeInputTypingResolve = null;
+                    resolve();
+                }
+            } else {
+                activeInputTypingTimer = null;
+                activeInputTypingTarget = null;
+                activeInputTypingElement = null;
+                if (activeInputTypingResolve === resolve) activeInputTypingResolve = null;
+                resolve();
+            }
+        }
+
+        typeNextChar();
+    });
+}
+
 // Game Functions
 function resetGame(preserveChallenge = false) {
     currentWordIndex = 0;
@@ -1922,15 +1998,32 @@ function buildOmniboxSuggestions(query, remoteData = null) {
     });
 }
 
-function syncShelfVisibility(targetArtistName) {
+function syncShelfVisibility(targetArtistName, activeTrackTitle = '') {
     if (typeof document === 'undefined') return;
-    document.querySelectorAll('.artist-track-card.active').forEach(btn => btn.classList.remove('active'));
+    const targetArtistNorm = targetArtistName ? normOmnibox(targetArtistName) : '';
+    const activeTrackNorm = activeTrackTitle ? normOmnibox(activeTrackTitle) : '';
+    document.querySelectorAll('.artist-track-card').forEach(btn => {
+        const cardTrackNorm = normOmnibox(btn.getAttribute ? (btn.getAttribute('data-track') || '') : '');
+        const cardArtistNorm = normOmnibox(btn.getAttribute ? (btn.getAttribute('data-artist') || '') : '');
+        const isMatch = Boolean(
+            activeTrackNorm &&
+            cardTrackNorm === activeTrackNorm &&
+            (!targetArtistNorm || !cardArtistNorm || cardArtistNorm === targetArtistNorm)
+        );
+        if (btn.classList) {
+            if (isMatch) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        }
+    });
     const shelf = document.getElementById('artist-tracks-shelf');
     if (!shelf) return;
     const initialName = (typeof window !== 'undefined' && window.__INITIAL_ARTIST__ && window.__INITIAL_ARTIST__.name)
         ? normOmnibox(window.__INITIAL_ARTIST__.name)
         : '';
-    const matchesInitial = Boolean(targetArtistName && initialName && normOmnibox(targetArtistName) === initialName);
+    const matchesInitial = Boolean(targetArtistNorm && initialName && targetArtistNorm === initialName);
     shelf.style.display = matchesInitial ? '' : 'none';
 }
 
@@ -1962,6 +2055,7 @@ function updateOmniboxSelectionUI() {
 
 async function selectOmniboxItem(item) {
     if (!item) return;
+    cancelInputTyping(false);
     hideSearchSuggestions();
     stopWPMUpdater();
 
@@ -1981,7 +2075,7 @@ async function selectOmniboxItem(item) {
     } else {
         const displayLabel = `${item.artist} - ${item.title}`;
         if (artistInput) artistInput.value = displayLabel;
-        syncShelfVisibility(item.artist);
+        syncShelfVisibility(item.artist, item.title);
         if (startBtn) startBtn.disabled = true;
         resetGame();
         try {
@@ -2163,6 +2257,7 @@ async function resolveSearchIntent(rawInput) {
 
 if (startBtn) {
     startBtn.addEventListener('click', async () => {
+        cancelInputTyping(true);
         // If user actively arrow-navigated to a specific dropdown row, honor that selection
         if (
             searchSuggestions &&
@@ -2191,7 +2286,7 @@ if (startBtn) {
         try {
             const intent = await resolveSearchIntent(inputValue);
             if (intent.mode === 'song') {
-                syncShelfVisibility(intent.artist || '');
+                syncShelfVisibility(intent.artist || '', intent.title || '');
                 await handleSongSearch(intent.query || inputValue, intent.artist, intent.title);
             } else {
                 const targetArtist = intent.artist || inputValue;
@@ -2210,10 +2305,12 @@ if (startBtn) {
 
 if (artistInput) {
     artistInput.addEventListener('input', () => {
+        cancelInputTyping(false);
         triggerOmniboxAutocomplete(artistInput.value);
     });
 
     artistInput.addEventListener('focus', () => {
+        cancelInputTyping(true);
         if (artistInput.value && artistInput.value.trim()) {
             triggerOmniboxAutocomplete(artistInput.value);
         }
@@ -2328,6 +2425,7 @@ async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = nu
     if (removeAdlibsCheckbox) removeAdlibsCheckbox.disabled = true;
 
     const searchQuery = artistName ? `${artistName} ${trackTitle}` : trackTitle;
+    cancelInputTyping(false);
     if (artistInput) artistInput.value = artistName ? `${artistName} - ${trackTitle}` : trackTitle;
 
     updateChallengeBanner();
@@ -2453,7 +2551,7 @@ async function parseAndLoadUrlParameters() {
     return false;
 }
 
-function bindArtistTrackCards() {
+function bindArtistTrackCards(typingSpeed = 35) {
     if (typeof document === 'undefined') return;
     const cards = document.querySelectorAll('.artist-track-card');
     cards.forEach((card) => {
@@ -2462,22 +2560,24 @@ function bindArtistTrackCards() {
             const track = card.getAttribute('data-track') || '';
             if (!track) return;
 
-            document.querySelectorAll('.artist-track-card.active').forEach(btn => btn.classList.remove('active'));
-            card.classList.add('active');
+            document.querySelectorAll('.artist-track-card').forEach(btn => {
+                if (btn.classList) btn.classList.remove('active');
+            });
+            if (card.classList) card.classList.add('active');
 
-            // Intentionally keep #artist-input untouched (e.g. "Sabrina Carpenter") so clicking "Go"
-            // afterward returns cleanly to random Artist Mystery rounds instead of locking into Song mode!
+            const displayLabel = artist ? `${artist} - ${track}` : track;
             hideSearchSuggestions();
             stopWPMUpdater();
             resetGame();
+            if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+            fakeTypeValue(artistInput, displayLabel, typingSpeed);
             startLoadingBar();
 
             try {
                 const query = artist ? `${artist} ${track}` : track;
                 await handleSongSearch(query, artist, track);
-                if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                }
                 if (typingArea && !typingArea.disabled) typingArea.focus();
             } catch (error) {
                 alert(error.message);
@@ -2761,8 +2861,13 @@ if (typeof module !== 'undefined' && module.exports) {
         isPreviewUrlFresh,
         fetchTrackDetails,
         handleArtistSearch,
+        handleSongSearch,
         ensureSelectedArtistCandidates,
         playSnippet,
+        fakeTypeValue,
+        cancelInputTyping,
+        bindArtistTrackCards,
+        syncShelfVisibility,
         _getState: () => ({
             totalKeystrokes,
             errorKeystrokes,
@@ -2786,6 +2891,7 @@ if (typeof module !== 'undefined' && module.exports) {
             guessCount,
             hintStage,
             artistTracks,
+            cachedSongLyrics,
             candidateSongs,
             artistCandidateCache,
             trackExtraDetails,
@@ -2820,6 +2926,7 @@ if (typeof module !== 'undefined' && module.exports) {
             if ('guessCount' in state) guessCount = state.guessCount;
             if ('hintStage' in state) hintStage = state.hintStage;
             if ('artistTracks' in state) artistTracks = state.artistTracks;
+            if ('cachedSongLyrics' in state) cachedSongLyrics = state.cachedSongLyrics;
             if ('candidateSongs' in state) candidateSongs = state.candidateSongs;
             if ('artistCandidateCache' in state) artistCandidateCache = state.artistCandidateCache;
             if ('trackExtraDetails' in state) trackExtraDetails = state.trackExtraDetails;
