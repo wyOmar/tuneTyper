@@ -5,10 +5,15 @@ body {
     padding: 0;
     background-color: #121212;
     color: #fff;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
 }
 
 /* Container */
 .container {
+    box-sizing: border-box;
+    width: 100%;
     max-width: 800px;
     margin: 15px auto 0;
     padding: 25px;
@@ -849,21 +854,16 @@ h1 {
 }
 
 .footer {
-    position: fixed;
-    bottom: 0;
-    left: 50%;
-    transform: translateX(-50%);
+    margin-top: auto;
     text-align: center;
     color: grey;
     background: transparent;
-    padding: 10px 0;
+    padding: 20px 0;
     width: 100%;
-    pointer-events: none;
-  }
-  
-  .footer a {
+}
+
+.footer a {
     color: inherit;
     text-decoration: underline;
-    pointer-events: auto; 
-  }
+}
   
