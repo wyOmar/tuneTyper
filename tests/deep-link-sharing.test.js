@@ -65,6 +65,8 @@ global.Audio = class {
 const {
     generateChallengeUrl,
     parseChallengeParams,
+    encodeChallengeToken,
+    decodeChallengeToken,
     extractRandomSection,
     generateShareText,
     resetGame,
@@ -73,30 +75,108 @@ const {
     _setState
 } = require('../public/script.js');
 
+test.describe('Binary field-packing challenge link compressor (ha.mr model)', () => {
+    test('encodeChallengeToken compresses challenge into compact URL-safe Base64', () => {
+        const payload = {
+            artist: 'Post Malone',
+            track: 'White Iverson',
+            wpm: 79,
+            acc: 88,
+            start: 58
+        };
+        const token = encodeChallengeToken(payload);
+        assert.ok(typeof token === 'string' && token.length > 0);
+        // Base64URL characters only (no +, /, or trailing =)
+        assert.match(token, /^[A-Za-z0-9_-]+$/);
+
+        // Verify space savings vs plain query string
+        const plainLength = 'artist=Post+Malone&track=White+Iverson&wpm=79&acc=88&start=58'.length; // 61 chars
+        assert.ok(token.length < plainLength, `Token length (${token.length}) should be smaller than plain query (${plainLength})`);
+        assert.equal(token.length, 40); // 40 chars = 34% reduction
+    });
+
+    test('decodeChallengeToken accurately restores all fields from binary token', () => {
+        const payload = {
+            artist: 'Taylor Swift',
+            track: 'The Fate of Ophelia',
+            wpm: 91,
+            acc: 90,
+            start: 12
+        };
+        const token = encodeChallengeToken(payload);
+        const decoded = decodeChallengeToken(token);
+        assert.deepEqual(decoded, payload);
+    });
+
+    test('decodeChallengeToken gracefully handles unicode and complex track titles', () => {
+        const payload = {
+            artist: 'Beyoncé',
+            track: "Don't Hurt Yourself (feat. Jack White)",
+            wpm: 105,
+            acc: 97,
+            start: 0
+        };
+        const token = encodeChallengeToken(payload);
+        const decoded = decodeChallengeToken(token);
+        assert.deepEqual(decoded, payload);
+    });
+});
+
 test.describe('Deep link challenge URL generation and parsing', () => {
-    test('generateChallengeUrl builds proper challenge URL with encoded params', () => {
+    test('generateChallengeUrl builds compact ?c= URL', () => {
         const url = generateChallengeUrl('Bohemian Rhapsody', 'Queen', 85, 98, 4);
-        assert.ok(url.startsWith('https://type.vincentchan.uk/?'));
+        assert.ok(url.startsWith('https://type.vincentchan.uk/?c='));
         
         const params = new URL(url).searchParams;
-        assert.equal(params.get('artist'), 'Queen');
-        assert.equal(params.get('track'), 'Bohemian Rhapsody');
-        assert.equal(params.get('wpm'), '85');
-        assert.equal(params.get('acc'), '98');
-        assert.equal(params.get('start'), '4');
+        assert.ok(params.has('c'));
+        const token = params.get('c');
+        const decoded = decodeChallengeToken(token);
+        assert.equal(decoded.artist, 'Queen');
+        assert.equal(decoded.track, 'Bohemian Rhapsody');
+        assert.equal(decoded.wpm, 85);
+        assert.equal(decoded.acc, 98);
+        assert.equal(decoded.start, 4);
     });
 
-    test('generateChallengeUrl safely omits missing optional metrics', () => {
-        const url = generateChallengeUrl('Creep', 'Radiohead', null, null, null);
-        const params = new URL(url).searchParams;
-        assert.equal(params.get('artist'), 'Radiohead');
-        assert.equal(params.get('track'), 'Creep');
-        assert.equal(params.has('wpm'), false);
-        assert.equal(params.has('acc'), false);
-        assert.equal(params.has('start'), false);
+    test('parseChallengeParams extracts payload from ?c= token', () => {
+        const token = encodeChallengeToken({
+            artist: 'Queen',
+            track: 'Bohemian Rhapsody',
+            wpm: 85,
+            acc: 98,
+            start: 4
+        });
+        const query = `?c=${token}`;
+        const parsed = parseChallengeParams(query);
+        assert.deepEqual(parsed, {
+            artist: 'Queen',
+            track: 'Bohemian Rhapsody',
+            wpm: 85,
+            acc: 98,
+            start: 4
+        });
     });
 
-    test('parseChallengeParams extracts artist, track, wpm, acc, and start correctly', () => {
+    test('parseChallengeParams also supports hash fragment #c= format', () => {
+        const token = encodeChallengeToken({
+            artist: 'Radiohead',
+            track: 'Karma Police',
+            wpm: 90,
+            acc: 95,
+            start: 10
+        });
+        const fragment = `#c=${token}`;
+        const parsed = parseChallengeParams(fragment);
+        assert.deepEqual(parsed, {
+            artist: 'Radiohead',
+            track: 'Karma Police',
+            wpm: 90,
+            acc: 95,
+            start: 10
+        });
+    });
+
+    test('parseChallengeParams maintains backwards compatibility with legacy query params', () => {
         const query = '?artist=Taylor%20Swift&track=Cruel%20Summer&wpm=102&acc=99&start=6';
         const parsed = parseChallengeParams(query);
         assert.deepEqual(parsed, {
@@ -108,9 +188,10 @@ test.describe('Deep link challenge URL generation and parsing', () => {
         });
     });
 
-    test('parseChallengeParams returns null for empty or irrelevant queries', () => {
+    test('parseChallengeParams returns null for empty or invalid queries', () => {
         assert.equal(parseChallengeParams(''), null);
         assert.equal(parseChallengeParams('?other=123'), null);
+        assert.equal(parseChallengeParams('?c=invalid_token'), null);
         assert.equal(parseChallengeParams(null), null);
     });
 });
@@ -165,7 +246,6 @@ test.describe('Bypassing guess the song game on shared challenges', () => {
             }
         });
 
-        // Trigger endGame
         endGame();
 
         const state = _getState();
@@ -175,8 +255,8 @@ test.describe('Bypassing guess the song game on shared challenges', () => {
     });
 });
 
-test.describe('Share scorecard text embeds challenge deep link', () => {
-    test('generateShareText produces challenge link containing track, artist, and score', () => {
+test.describe('Share scorecard text embeds compact challenge deep link', () => {
+    test('generateShareText produces challenge link containing ?c= token', () => {
         _setState({
             isSharedGame: false,
             selectedTrack: {
@@ -194,11 +274,16 @@ test.describe('Share scorecard text embeds challenge deep link', () => {
         assert.ok(shareText.includes('🎵 TuneTyper'));
         assert.ok(shareText.includes('🎤 "Starlight" — Muse'));
         assert.ok(shareText.includes('⚡ 92 WPM | 97% Acc'));
-        assert.ok(shareText.includes('https://type.vincentchan.uk/?'));
-        assert.ok(shareText.includes('track=Starlight'));
-        assert.ok(shareText.includes('artist=Muse'));
-        assert.ok(shareText.includes('wpm=92'));
-        assert.ok(shareText.includes('acc=97'));
-        assert.ok(shareText.includes('start=3'));
+        assert.ok(shareText.includes('https://type.vincentchan.uk/?c='));
+
+        // Extract token from share link and verify decoded data
+        const match = shareText.match(/https:\/\/type\.vincentchan\.uk\/\?c=([A-Za-z0-9_-]+)/);
+        assert.ok(match, 'Link must match token format');
+        const decoded = decodeChallengeToken(match[1]);
+        assert.equal(decoded.track, 'Starlight');
+        assert.equal(decoded.artist, 'Muse');
+        assert.equal(decoded.wpm, 92);
+        assert.equal(decoded.acc, 97);
+        assert.equal(decoded.start, 3);
     });
 });
