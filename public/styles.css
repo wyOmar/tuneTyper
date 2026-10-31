@@ -1,4 +1,9 @@
 /* General Styles */
+html {
+    -webkit-text-size-adjust: 100%;
+    overflow-x: clip;
+}
+
 body {
     font-family: Arial, sans-serif;
     margin: 0;
@@ -6,8 +11,10 @@ body {
     background-color: #121212;
     color: #fff;
     min-height: 100vh;
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
+    overflow-x: clip;
 }
 
 /* Container */
@@ -43,13 +50,14 @@ h1 {
     flex: 1;
     min-width: 0;
     display: flex;
+    align-items: center;
 }
 
 #artist-input {
     width: 100%;
     box-sizing: border-box;
     height: 44px;
-    padding: 10px 12px;
+    padding: 10px 36px 10px 12px;
     font-size: 18px;
     font-family: monospace;
     border: 1px solid #444;
@@ -61,6 +69,32 @@ h1 {
 #artist-input:focus {
     outline: none;
     border-color: #666;
+}
+
+.search-clear-btn {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: #888;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.search-clear-btn:hover {
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.08);
 }
 
 .search-suggestions {
@@ -198,11 +232,13 @@ h1 {
     --config-inactive: #888;    /* same as input placeholders */
     --config-hover: #fff;
     --config-active: #4caf50;   /* site green (loading bar) */
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 4px;
     width: fit-content;
+    max-width: 100%;
     margin: 0 auto 20px;
     padding: 6px 12px;
     background: var(--config-bg);
@@ -215,6 +251,7 @@ h1 {
 .config-toggle {
     cursor: pointer;
     user-select: none;
+    flex-shrink: 0;
 }
 
 .config-toggle-text {
@@ -224,6 +261,7 @@ h1 {
     padding: 4px 8px;
     border-radius: 5px;
     color: var(--config-inactive);
+    white-space: nowrap;
     transition: color 0.15s;
 }
 
@@ -246,14 +284,16 @@ h1 {
 
 .config-icon {
     font-weight: bold;
+    white-space: nowrap;
 }
 
 .config-divider {
-    width: 4px;
-    height: 20px;
-    margin: 0 6px;
+    width: 2px;
+    height: 18px;
+    margin: 0 4px;
     border-radius: 2px;
     background: #444;
+    flex-shrink: 0;
 }
 
 .visually-hidden {
@@ -269,36 +309,35 @@ h1 {
 }
 
 /* Game Section */
-/* .game-section {
-    margin-bottom: 20px;
-} */
-
 .text-display {
+    box-sizing: border-box;
     font-size: 18px;
     font-family: monospace;
-    line-height: 1.5;
+    line-height: 28px;
     background: #2a2a2a;
-    padding: 10px;
-    border-radius: 5px;
+    padding: 12px 14px;
+    border-radius: 6px;
     border: 1px solid #333;
-    margin-bottom: 15px;
-    height: 85px;
-    overflow-y: auto;
+    margin: 0 0 14px;
+    height: 108px; /* 12px top + 3 * 28px lines + 12px bottom = zero half-sliced lines */
+    overflow-y: hidden;
     color: #fff;
+    cursor: text;
     position: relative; /* so word offsetTop is relative to this box (auto-scroll) */
 }
 
 .text-display .word {
-    transition: color 0.2s;
+    transition: color 0.15s;
 }
 
 .text-display .current {
     text-decoration: underline;
+    text-underline-offset: 3px;
     color: #fff;
 }
 
 .text-display .correct {
-    color: green;
+    color: #4caf50;
 }
 
 .text-display .incorrect {
@@ -311,7 +350,7 @@ h1 {
 }
 
 .text-display .char.extra {
-    color: #a3221a;
+    color: #ff6b6b;
     background-color: rgba(244, 67, 54, 0.25);
 }
 
@@ -326,24 +365,46 @@ h1 {
 /* Typing Area */
 .typing-area-container {
     display: flex;
-    align-items: stretch; /* End Game button matches the textarea height */
+    align-items: stretch;
     gap: 10px;
-    margin-top: 5px;
-    margin-bottom: 15px;
+    margin-top: 4px;
+    margin-bottom: 12px;
+}
+
+.typing-area-container:empty,
+.typing-area-container:not(:has(#typing-area:not([style*="display: none"]))):not(:has(#end-game-btn:not([style*="display: none"]))) {
+    margin: 0;
 }
 
 #typing-area {
+    box-sizing: border-box;
     flex: 1;
     min-width: 0;
     font-size: 18px;
-    padding: 10px;
-    height: 40px;
+    font-family: monospace;
+    padding: 0 14px;
+    height: 48px;
     border: 1px solid #444;
-    border-radius: 5px;
+    border-radius: 6px;
     background-color: #333;
     color: #fff;
-    resize: none;
     margin: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+#typing-area:focus {
+    outline: none;
+    border-color: #4caf50;
+}
+
+#typing-area::placeholder {
+    color: #888;
+}
+
+#typing-area.lowercase-mode:not(:placeholder-shown) {
+    text-transform: lowercase;
 }
 
 #typing-area.incorrect {
@@ -353,23 +414,32 @@ h1 {
 }
 
 #end-game-btn {
+    box-sizing: border-box;
     flex: 0 0 auto;
-    padding: 10px 20px;
-    font-size: 18px;
+    height: 48px;
+    padding: 0 18px;
+    font-size: 15px;
+    font-family: monospace;
+    font-weight: bold;
+    white-space: nowrap;
     color: #fff;
     background-color: #dc3545;
     border: none;
-    border-radius: 5px;
+    border-radius: 6px;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    transition: background-color 0.15s ease, transform 0.05s ease;
 }
 
 #end-game-btn:hover {
     background-color: #b52a37;
 }
 
+#end-game-btn:active {
+    transform: scale(0.98);
+}
 
 .result-text, .song-info h3 {
     font-size: 20px;
@@ -377,16 +447,19 @@ h1 {
     margin: 10px 0;
     text-align: center;
     color: #fff;
-    max-width: 250px;
 }
 
 .wpmresult-text {
-    color: green;
-    font-size: 30px;
+    color: #4caf50;
+    font-size: 26px;
+    font-weight: bold;
     font-family: monospace;
-    margin-top: 0px;
-    margin-bottom:0px;
-    
+    margin: 0;
+    line-height: 1.3;
+}
+
+.wpmresult-text:empty {
+    display: none;
 }
 
 /* Guess Section */
@@ -809,6 +882,11 @@ h1 {
     margin-top: 20px;
 }
 
+.song-info:empty {
+    display: none;
+    margin: 0;
+}
+
 .song-info img {
     max-width: 100%;
     height: auto;
@@ -820,6 +898,63 @@ h1 {
     margin: 10px auto 15px;
     width: 100%;
     max-width: 300px;
+}
+
+.final-results {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+}
+
+.final-media-col {
+    flex: 0 0 240px;
+    width: 240px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.final-track-header {
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+.song-info .final-track-title {
+    margin: 0 0 4px;
+    font-size: 20px;
+    font-weight: bold;
+    color: #fff;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+.final-track-artist {
+    margin: 0;
+    font-size: 15px;
+    color: #aaa;
+    font-weight: normal;
+}
+
+.song-info .final-album-art {
+    width: 240px;
+    height: 240px;
+    border-radius: 8px;
+    object-fit: cover;
+    display: block;
+}
+
+.song-info .final-audio-player {
+    width: 100%;
+    max-width: 240px;
+    height: 40px;
+    margin: 12px 0 0;
+}
+
+.final-content-col {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 /* Navbar */
@@ -851,17 +986,18 @@ h1 {
 }
 
 .lyrics-box {
+    box-sizing: border-box;
     flex: 1; 
     max-height: 300px; 
     font-family: Arial, sans-serif; 
-    font-size: 18px;
+    font-size: 17px;
     background: #2a2a2a;
-    padding: 10px;
-    border-radius: 5px;
+    padding: 12px 14px;
+    border-radius: 6px;
     border: 1px solid #333;
-    margin-bottom: 15px;
+    margin-bottom: 12px;
     overflow-y: auto;
-    line-height: 1.5;
+    line-height: 1.55;
     position: relative; /* so .selectedLyrics offsetTop is relative to this box */
     scrollbar-width: none; 
     -ms-overflow-style: none; 
@@ -870,22 +1006,24 @@ h1 {
     display: none;
 }
 
-.lyrics-box p {
-    margin-bottom: 0px;
-    margin-top: 0px;
+.lyrics-box p,
+.display-lyrics {
+    margin: 0;
 }
 
-.selectedLyrics{
-    color:green;
+.selectedLyrics {
+    color: #4caf50;
+    font-weight: 600;
+    margin: 4px 0;
 }
 
 /* Share Score */
 .share-container {
-    margin-top: 12px;
+    margin-top: 4px;
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 12px;
+    align-items: stretch;
+    gap: 10px;
 }
 
 .share-btn {
@@ -893,20 +1031,21 @@ h1 {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 10px 18px;
-    font-size: 15px;
+    min-height: 44px;
+    padding: 10px 14px;
+    font-size: 14px;
     font-family: monospace;
     font-weight: bold;
     color: #121212;
     background-color: #4caf50;
     border: none;
-    border-radius: 5px;
+    border-radius: 6px;
     cursor: pointer;
     white-space: nowrap;
-    flex: 1 1 0px;
-    min-width: 170px;
+    flex: 1 1 150px;
+    min-width: 0;
     box-sizing: border-box;
-    transition: background-color 0.15s ease, transform 0.05s ease;
+    transition: background-color 0.15s ease, transform 0.05s ease, border-color 0.15s ease;
 }
 
 .share-btn:hover {
@@ -915,6 +1054,17 @@ h1 {
 
 .share-btn:active {
     transform: scale(0.98);
+}
+
+.play-again-btn {
+    background-color: #242424;
+    color: #81c784;
+    border: 1px solid #4caf50;
+}
+
+.play-again-btn:hover {
+    background-color: #1c2b1e;
+    color: #a5d6a7;
 }
 
 .share-toast {
@@ -994,7 +1144,7 @@ h1 {
     text-align: center;
     color: grey;
     background: transparent;
-    padding: 24px 0 20px;
+    padding: 24px 0 calc(20px + env(safe-area-inset-bottom, 0px));
     width: 100%;
 }
 
@@ -1144,6 +1294,10 @@ h1 {
     background: #2c2c2c;
 }
 
+.artist-track-card:active {
+    transform: scale(0.98);
+}
+
 .artist-track-card.active {
     border-color: #4caf50;
     background: #1c2b1e;
@@ -1204,4 +1358,334 @@ h1 {
     overflow: hidden;
     text-overflow: ellipsis;
     display: block;
+}
+
+/* Mobile & Compact Viewport Experience */
+@media (max-width: 640px) {
+    .navbar {
+        padding: 8px 14px;
+    }
+
+    .navbar-logo {
+        width: 24px;
+        height: 24px;
+        margin-right: 10px;
+    }
+
+    .navbar-title {
+        font-size: 1.25rem;
+    }
+
+    .container {
+        width: calc(100% - 20px);
+        margin: 10px auto 0;
+        padding: 14px;
+        border-radius: 10px;
+    }
+
+    .artist-tracks-container {
+        width: calc(100% - 20px);
+        margin: 12px auto 0;
+        padding: 14px;
+    }
+
+    .input-section {
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+
+    #artist-input {
+        height: 44px;
+        font-size: 16px; /* >= 16px prevents iOS Safari forced zoom on focus */
+        padding: 8px 34px 8px 10px;
+    }
+
+    #start-btn {
+        height: 44px;
+        padding: 0 16px;
+        font-size: 16px;
+        font-weight: bold;
+        flex-shrink: 0;
+    }
+
+    .search-suggestions {
+        max-height: min(250px, 44vh);
+    }
+
+    .search-suggestion-item {
+        min-height: 44px;
+        box-sizing: border-box;
+        padding: 9px 10px;
+        font-size: 13.5px;
+    }
+
+    .config-bar {
+        width: 100%;
+        justify-content: space-evenly;
+        gap: 2px;
+        padding: 5px 6px;
+        margin: 0 auto 12px;
+        font-size: 12.5px;
+    }
+
+    .config-toggle-text {
+        padding: 5px 6px;
+        gap: 4px;
+    }
+
+    .config-divider {
+        margin: 0 2px;
+        height: 16px;
+    }
+
+    .challenge-banner {
+        padding: 8px 12px;
+        margin-bottom: 12px;
+        font-size: 12.5px;
+        line-height: 1.4;
+    }
+
+    .text-display {
+        font-size: 16px;
+        line-height: 25px;
+        padding: 10px 12px;
+        height: 95px; /* 10px top + 3 * 25px lines + 10px bottom */
+        margin: 0 0 10px;
+    }
+
+    /* Once post-game song info + full highlighted lyrics are rendered, collapse the redundant top snippet box on mobile */
+    .container:has(#song-info:not(:empty)) .text-display {
+        display: none;
+    }
+
+    .typing-area-container {
+        gap: 8px;
+        margin-top: 0;
+        margin-bottom: 10px;
+    }
+
+    #typing-area {
+        height: 46px;
+        font-size: 16px; /* >= 16px prevents iOS Safari forced zoom */
+        padding: 0 12px;
+    }
+
+    #end-game-btn {
+        height: 46px;
+        padding: 0 13px;
+        font-size: 13.5px;
+    }
+
+    .wpmresult-text {
+        font-size: 20px;
+        text-align: center;
+        padding: 7px 12px;
+        background: #242424;
+        border: 1px solid #333;
+        border-radius: 6px;
+    }
+
+    /* Guess the Song Mobile Layout */
+    .guess-section {
+        margin-top: 14px;
+    }
+
+    .guess-heading {
+        font-size: 13px;
+        margin-bottom: 12px;
+    }
+
+    .mystery-title {
+        gap: 8px 10px;
+        padding: 8px 10px;
+        margin-bottom: 12px;
+    }
+
+    .mystery-word {
+        gap: 3px;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .mystery-char {
+        min-width: 16px;
+        height: 24px;
+        font-size: 15px;
+        padding: 0 2px;
+    }
+
+    .hints-panel {
+        padding: 12px;
+        margin-bottom: 12px;
+    }
+
+    .hints-body {
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .hint-cover-box {
+        width: 78px;
+        height: 78px;
+    }
+
+    .meta-pill {
+        font-size: 11.5px;
+        padding: 3px 7px;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+
+    .snippet-btn {
+        width: 100%;
+        justify-content: center;
+        min-height: 40px;
+        font-size: 13.5px;
+        box-sizing: border-box;
+    }
+
+    .guess-input-container {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    #guess-input {
+        box-sizing: border-box;
+        flex: 1 1 100%;
+        height: 44px;
+        font-size: 16px;
+    }
+
+    .guess-submit-btn,
+    .skip-btn {
+        flex: 1 1 calc(50% - 4px);
+        height: 44px;
+        font-size: 15px;
+    }
+
+    .guess-suggestions {
+        top: 48px;
+        max-height: min(210px, 40vh);
+    }
+
+    .guess-suggestion-item {
+        min-height: 44px;
+        box-sizing: border-box;
+    }
+
+    /* Post-Game Results Mobile Layout */
+    .song-info {
+        margin-top: 12px;
+    }
+
+    .challenge-outcome {
+        font-size: 13px;
+        padding: 10px 12px;
+        margin-bottom: 12px;
+    }
+
+    .final-results {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+
+    .final-media-col {
+        box-sizing: border-box;
+        width: 100%;
+        flex: none;
+        display: grid;
+        grid-template-columns: 76px minmax(0, 1fr);
+        gap: 10px 12px;
+        align-items: center;
+        background: #242424;
+        border: 1px solid #333;
+        border-radius: 8px;
+        padding: 12px;
+        text-align: left;
+    }
+
+    .song-info .final-album-art {
+        grid-column: 1;
+        grid-row: 1;
+        width: 76px;
+        height: 76px;
+        border-radius: 6px;
+    }
+
+    .final-track-header {
+        grid-column: 2;
+        grid-row: 1;
+        margin: 0;
+        text-align: left;
+        min-width: 0;
+    }
+
+    .song-info .final-track-title {
+        text-align: left;
+        font-size: 18px;
+        margin: 0 0 4px;
+    }
+
+    .final-track-artist {
+        text-align: left;
+        font-size: 14px;
+    }
+
+    .song-info .final-audio-player {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        width: 100%;
+        max-width: none;
+        height: 38px;
+        margin: 2px 0 0;
+    }
+
+    .lyrics-box {
+        width: 100%;
+        max-height: 210px;
+        font-size: 15.5px;
+        line-height: 1.5;
+        padding: 12px;
+        margin-bottom: 10px;
+        text-align: left;
+    }
+
+    .share-container {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin-top: 2px;
+    }
+
+    .share-btn {
+        width: 100%;
+        min-width: 0;
+        height: 44px;
+        font-size: 14px;
+    }
+
+    .artist-seo-links {
+        padding: 0 14px;
+        gap: 6px 10px;
+        font-size: 11.5px;
+    }
+}
+
+@media (max-width: 375px) {
+    .container,
+    .artist-tracks-container {
+        width: calc(100% - 14px);
+        padding: 12px;
+    }
+
+    .config-bar {
+        font-size: 11.5px;
+        padding: 4px;
+    }
+
+    .config-toggle-text {
+        padding: 4px 5px;
+        gap: 3px;
+    }
 }
