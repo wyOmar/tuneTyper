@@ -746,8 +746,9 @@ h1 {
 
 /* Share Score */
 .share-container {
-    margin-top: 10px;
+    margin-top: 12px;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 12px;
 }
@@ -757,8 +758,8 @@ h1 {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 10px 22px;
-    font-size: 16px;
+    padding: 10px 18px;
+    font-size: 15px;
     font-family: monospace;
     font-weight: bold;
     color: #121212;
@@ -766,8 +767,10 @@ h1 {
     border: none;
     border-radius: 5px;
     cursor: pointer;
-    width: auto;
+    white-space: nowrap;
+    flex: 1 1 0px;
     min-width: 170px;
+    box-sizing: border-box;
     transition: background-color 0.15s ease, transform 0.05s ease;
 }
 
@@ -780,9 +783,12 @@ h1 {
 }
 
 .share-toast {
-    font-size: 14px;
+    font-size: 13px;
     font-family: monospace;
-    color: #4caf50;
+    color: #81c784;
+    width: 100%;
+    margin-top: 2px;
+    text-align: center;
 }
 
 /* Challenge Banner & Outcomes */
@@ -790,7 +796,6 @@ h1 {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
     background: #1c2b1e;
     border: 1px solid #4caf50;
     border-radius: 6px;
@@ -800,10 +805,6 @@ h1 {
     font-size: 14px;
     color: #e0e0e0;
     text-align: center;
-}
-
-.challenge-banner .challenge-icon {
-    font-size: 16px;
 }
 
 .challenge-banner strong {
