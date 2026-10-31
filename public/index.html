@@ -49,13 +49,22 @@
 
 
             <button id="start-btn">Go</button>
-            <label for="remove-punctuation" class="checkbox-label">
-                <input type="checkbox" id="remove-punctuation" checked>
-                Punctuation
+        </div>
+
+        <!-- Monkeytype-style mode toggles (checked = included in the typing text) -->
+        <div class="config-bar" role="group" aria-label="Typing options">
+            <label for="remove-punctuation" class="config-toggle">
+                <input type="checkbox" id="remove-punctuation" class="visually-hidden">
+                <span class="config-toggle-text"><span class="config-icon" aria-hidden="true">@</span>punctuation</span>
             </label>
-            <label for="remove-adlibs" class="checkbox-label">
-                <input type="checkbox" id="remove-adlibs" checked>
-                Ad-libs
+            <label for="include-numbers" class="config-toggle">
+                <input type="checkbox" id="include-numbers" class="visually-hidden">
+                <span class="config-toggle-text"><span class="config-icon" aria-hidden="true">#</span>numbers</span>
+            </label>
+            <span class="config-divider" aria-hidden="true"></span>
+            <label for="remove-adlibs" class="config-toggle">
+                <input type="checkbox" id="remove-adlibs" class="visually-hidden" checked>
+                <span class="config-toggle-text"><span class="config-icon" aria-hidden="true">( )</span>ad-libs</span>
             </label>
         </div>
 

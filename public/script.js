@@ -6,6 +6,7 @@ const displayText = document.getElementById('display-text');
 const wpmResult = document.getElementById('wpm-result');
 const removePunctuationCheckbox = document.getElementById('remove-punctuation');
 const removeAdlibsCheckbox = document.getElementById('remove-adlibs');
+const includeNumbersCheckbox = document.getElementById('include-numbers');
 const songInfo = document.getElementById('song-info');
 const guessSection = document.getElementById('guess-section');
 const guessInput = document.getElementById('guess-input');
@@ -170,7 +171,7 @@ function extractRandomSection(text, minLength = 150, maxLength = 300) {
     return sectionSelected;
 }
 
-function normalizeTextForTyping(text, removePunctuation = false, removeAdlibs = false) {
+function normalizeTextForTyping(text, removePunctuation = false, removeAdlibs = false, removeNumbers = false) {
     // The API being used for lyrics, ovh, sometimes returns lyrics with weird characters like that weird "e"
     text = text.normalize('NFKD').replace(/е/g, 'e');
     text = text.replace(/[\u2018\u2019\u201A\u201B]/g, "'")
@@ -179,11 +180,24 @@ function normalizeTextForTyping(text, removePunctuation = false, removeAdlibs = 
     if (removeAdlibs) {
         text = text.replace(/\(\s*[^()]{1,25}\s*\)/g, '');
     }
+    if (removeNumbers) {
+        // Drop whole words that contain digits (e.g. "24/7", "2x", "1998") rather than leaving fragments
+        text = text.replace(/\S*\d\S*/g, '');
+    }
     if (removePunctuation) {
         text = text.replace(/[\p{P}\p{S}]/gu, '').toLowerCase();
     }
 
     return text.trim();
+}
+
+function escapeHtml(str) {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 function normalizeText(text) {
@@ -229,6 +243,7 @@ function resetGame() {
     guessInput.value = '';
     removePunctuationCheckbox.disabled = false;
     removeAdlibsCheckbox.disabled = false;
+    includeNumbersCheckbox.disabled = false;
     searchTypeDropdown.disabled = false;
     endGameBtn.style.display = 'none';
 }
@@ -236,12 +251,14 @@ function resetGame() {
 function updateDisplayedText() {
     const removePunctuation = !removePunctuationCheckbox.checked;
     const removeAdlibs = !removeAdlibsCheckbox.checked;
-    const textToDisplay = normalizeTextForTyping(typeSection, removePunctuation, removeAdlibs);
+    const removeNumbers = !includeNumbersCheckbox.checked;
+    const textToDisplay = normalizeTextForTyping(typeSection, removePunctuation, removeAdlibs, removeNumbers);
     processedWords = textToDisplay.split(/\s+/).filter(Boolean);
 
     displayText.innerHTML = processedWords
-        .map((word, index) => `<span id="word-${index}">${word}</span>`)
+        .map((word, index) => `<span id="word-${index}" class="word">${escapeHtml(word)}</span>`)
         .join(' ');
+    displayText.scrollTop = 0;
 
     updateWordHighlight();
     typingArea.disabled = false;
@@ -249,16 +266,52 @@ function updateDisplayedText() {
 }
 
 function updateWordHighlight() {
-    document.querySelectorAll('span').forEach((span, index) => {
-        span.classList.remove('current', 'correct');
-        if (index < currentWordIndex) {
-            span.classList.add('correct');
-        }
+    displayText.querySelectorAll('.word').forEach((span, index) => {
+        span.classList.toggle('correct', index < currentWordIndex);
+        span.classList.toggle('current', index === currentWordIndex);
     });
 
-    const currentWordElement = document.getElementById(`word-${currentWordIndex}`);
-    if (currentWordElement) {
-        currentWordElement.classList.add('current');
+    renderWordProgress(currentWordIndex, '');
+    scrollCurrentWordIntoView();
+}
+
+// Typeracer/Monkeytype-style feedback: colour each character of the word being typed
+// green (correct) or red (incorrect), show overflow characters, and draw a caret.
+function renderWordProgress(index, typed, showCaret = true) {
+    const wordElement = document.getElementById(`word-${index}`);
+    const word = processedWords[index];
+    if (!wordElement || word === undefined) return;
+
+    let html = '';
+    for (let i = 0; i < word.length; i++) {
+        const classes = ['char'];
+        if (i < typed.length) {
+            classes.push(typed[i] === word[i] ? 'correct' : 'incorrect');
+        }
+        if (showCaret && i === typed.length) classes.push('caret');
+        if (showCaret && i === word.length - 1 && typed.length >= word.length) classes.push('caret-end');
+        html += `<span class="${classes.join(' ')}">${escapeHtml(word[i])}</span>`;
+    }
+    // Characters typed past the end of the word
+    for (let i = word.length; i < typed.length; i++) {
+        html += `<span class="char extra">${escapeHtml(typed[i])}</span>`;
+    }
+
+    wordElement.innerHTML = html;
+}
+
+// Keep the current word visible inside the (fixed-height) display box
+function scrollCurrentWordIntoView() {
+    const wordElement = document.getElementById(`word-${currentWordIndex}`);
+    if (!wordElement) return;
+
+    const top = wordElement.offsetTop;
+    const bottom = top + wordElement.offsetHeight;
+    const viewTop = displayText.scrollTop;
+    const viewBottom = viewTop + displayText.clientHeight;
+
+    if (top < viewTop || bottom > viewBottom) {
+        displayText.scrollTop = top - parseFloat(getComputedStyle(displayText).paddingTop);
     }
 }
 
@@ -369,6 +422,24 @@ function showFinalInfo() {
     if (audioElement) {
         audioElement.volume = 0.25;
     }
+
+    // Bring the highlighted (typed) lyrics into view inside the lyrics box
+    scrollToSelectedLyrics();
+    // The album art changes the lyrics box width once loaded, which reflows the text, so re-align then
+    const albumImage = document.getElementById('album-image');
+    if (albumImage && !albumImage.complete) {
+        albumImage.addEventListener('load', scrollToSelectedLyrics, { once: true });
+    }
+}
+
+function scrollToSelectedLyrics() {
+    const lyricsBox = songInfo.querySelector('.lyrics-box');
+    const selected = lyricsBox && lyricsBox.querySelector('.selectedLyrics');
+    if (!selected) return;
+
+    // Centre the selection vertically (or align its top if it's taller than the box)
+    const offset = Math.max(0, (lyricsBox.clientHeight - selected.offsetHeight) / 2);
+    lyricsBox.scrollTo({ top: Math.max(0, selected.offsetTop - offset), behavior: 'smooth' });
 }
 
 function giveUp() {
@@ -410,6 +481,7 @@ typingArea.addEventListener('input', () => {
         testStarted = true;
         removePunctuationCheckbox.disabled = true;
         removeAdlibsCheckbox.disabled = true;
+        includeNumbersCheckbox.disabled = true;
         searchTypeDropdown.disabled = true;
         startWPMUpdater();
     }
@@ -421,15 +493,22 @@ typingArea.addEventListener('input', () => {
 
     if (normalizedTypedText === normalizedCurrentWord) {
         typingArea.value = '';
+        typingArea.classList.remove('incorrect');
+        // Clear per-character state on the finished word; it's coloured green as a whole
+        renderWordProgress(currentWordIndex, '', false);
         currentWordIndex++;
         updateWordHighlight();
 
         if (currentWordIndex === processedWords.length) {
             endGame();
             searchTypeDropdown.disabled = false;
-            return;
         }
-    } else if (!normalizedCurrentWord.startsWith(normalizedTypedText)) {
+        return;
+    }
+
+    renderWordProgress(currentWordIndex, normalizedTypedText);
+
+    if (!normalizedCurrentWord.startsWith(normalizedTypedText)) {
         typingArea.classList.add('incorrect');
     } else {
         typingArea.classList.remove('incorrect');
@@ -453,6 +532,10 @@ removePunctuationCheckbox.addEventListener('change', () => {
 });
 
 removeAdlibsCheckbox.addEventListener('change', () => {
+    if (!testStarted) updateDisplayedText();
+});
+
+includeNumbersCheckbox.addEventListener('change', () => {
     if (!testStarted) updateDisplayedText();
 });
 
