@@ -1185,7 +1185,7 @@ function generateChallengeUrl(trackTitle, artistName, wpm, acc, startIndex, opti
     const origin = (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin !== 'null' && !window.location.origin.startsWith('file:'))
         ? window.location.origin
         : 'https://type.vincentchan.uk';
-    const pathname = (typeof window !== 'undefined' && window.location && window.location.pathname) ? window.location.pathname : '/';
+    const pathname = '/';
 
     const punc = (options && options.punc !== undefined)
         ? Boolean(options.punc)
@@ -1883,30 +1883,67 @@ async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = nu
     }
 }
 
-async function parseAndLoadUrlParameters() {
-    if (typeof window === 'undefined' || !window.location || (!window.location.search && !window.location.hash)) return false;
-    const query = window.location.search || window.location.hash || '';
-    const parsed = parseChallengeParams(query);
-    if (!parsed) return false;
-
-    challengerWPM = parsed.wpm;
-    challengerAcc = parsed.acc;
-    challengeStartIndex = parsed.start;
-
-    if (parsed.track) {
-        isSharedGame = true;
-        await loadSharedChallenge(parsed.artist, parsed.track, parsed.start, {
-            punc: parsed.punc,
-            num: parsed.num,
-            adlib: parsed.adlib
-        });
-        return true;
-    } else if (parsed.artist) {
-        if (artistInput) artistInput.value = parsed.artist;
-        if (searchTypeDropdown) searchTypeDropdown.value = 'artist';
-        await handleArtistSearch(parsed.artist);
-        return true;
+function getArtistFromLocationPath(pathname) {
+    if (typeof window !== 'undefined' && window.__INITIAL_ARTIST__ && window.__INITIAL_ARTIST__.name) {
+        return window.__INITIAL_ARTIST__.name;
     }
+    if (!pathname && typeof window !== 'undefined' && window.location) {
+        pathname = window.location.pathname;
+    }
+    if (!pathname || pathname === '/' || pathname === '/index.html') return null;
+
+    const cleanPath = pathname.replace(/^\/+|\/+$/g, '');
+    const parts = cleanPath.split('/');
+    const slug = (parts.length === 2 && parts[0].toLowerCase() === 'artist') ? parts[1] : (parts.length === 1 ? parts[0] : null);
+    if (!slug || slug.includes('.')) return null;
+
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(slug)) return null;
+    return slug
+        .split('-')
+        .filter(Boolean)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join(' ');
+}
+
+async function parseAndLoadUrlParameters() {
+    if (typeof window === 'undefined' || !window.location) return false;
+    const query = window.location.search || window.location.hash || '';
+    const parsed = query ? parseChallengeParams(query) : null;
+
+    if (parsed) {
+        challengerWPM = parsed.wpm;
+        challengerAcc = parsed.acc;
+        challengeStartIndex = parsed.start;
+
+        if (parsed.track) {
+            isSharedGame = true;
+            await loadSharedChallenge(parsed.artist, parsed.track, parsed.start, {
+                punc: parsed.punc,
+                num: parsed.num,
+                adlib: parsed.adlib
+            });
+            return true;
+        } else if (parsed.artist) {
+            if (artistInput) artistInput.value = parsed.artist;
+            if (searchTypeDropdown) searchTypeDropdown.value = 'artist';
+            await handleArtistSearch(parsed.artist);
+            return true;
+        }
+    }
+
+    const routeArtist = getArtistFromLocationPath(window.location.pathname);
+    if (routeArtist) {
+        if (artistInput) artistInput.value = routeArtist;
+        if (searchTypeDropdown) searchTypeDropdown.value = 'artist';
+        try {
+            await handleArtistSearch(routeArtist);
+            return true;
+        } catch (err) {
+            console.warn(`Could not load artist route "${routeArtist}", falling back to default playlist:`, err);
+            return false;
+        }
+    }
+
     return false;
 }
 
@@ -1953,6 +1990,7 @@ async function handleArtistSearch(artistName) {
     }
 
     await tryFetchLyricsFromTracks(artistTracks);
+    ensureSelectedArtistCandidates();
 }
 
 async function handleSongSearch(songName) {
@@ -2125,6 +2163,8 @@ if (typeof module !== 'undefined' && module.exports) {
         filterAndShowSuggestions,
         isTrackBySelectedArtist,
         getSuggestionMatchRank,
+        getArtistFromLocationPath,
+        parseAndLoadUrlParameters,
         _getState: () => ({
             totalKeystrokes,
             errorKeystrokes,

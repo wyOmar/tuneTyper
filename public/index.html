@@ -4,13 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="google-site-verification" content="mGyMTMTchgWR3Bz98RD9ACaNmpuz8U5zopN5UWPsy0c" />
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="/styles.css">
 
     <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
     <link rel="manifest" href="/favicon/site.webmanifest">
     <link rel="shortcut icon" href="/favicon/favicon.ico">
+    <link rel="canonical" href="https://type.vincentchan.uk/">
 
     <title>TuneTyper - Type Song Lyrics &amp; Guess the Tune</title>
     <meta name="description" content="Type lyrics from your favorite artists, test your typing speed, and guess the song in TuneTyper. The ultimate music typing game. Play free online now!">
@@ -19,7 +20,7 @@
     <meta name="robots" content="index, follow">
     <meta property="og:title" content="TuneTyper - Type Song Lyrics &amp; Guess the Tune">
     <meta property="og:description" content="Type lyrics from your favorite artists, guess the tune, and beat your WPM in TuneTyper. Play free in your browser!">
-    <meta property="og:url" content="https://type.vincentchan.uk">
+    <meta property="og:url" content="https://type.vincentchan.uk/">
     <meta property="og:type" content="website">
     <meta property="og:image" content="https://type.vincentchan.uk/og-image.png">
     <meta property="og:image:type" content="image/png">
@@ -37,8 +38,10 @@
 <body>
 
     <div class="navbar">
-        <img src="/favicon/favicon-32x32.png" alt="Site Logo" class="navbar-logo">
-        <h1 class="navbar-title">TuneTyper</h1>
+        <a href="/" class="navbar-brand">
+            <img src="/favicon/favicon-32x32.png" alt="Site Logo" class="navbar-logo">
+            <h1 class="navbar-title">TuneTyper</h1>
+        </a>
     </div>
     
     <div class="container">
@@ -142,17 +145,30 @@
         <div id="song-info" class="song-info"></div>
     </div>
     <footer class="footer">
+        <nav class="artist-seo-links" aria-label="Popular artists">
+            <span class="artist-seo-label">Popular Artists:</span>
+            <a href="/taylor-swift">Taylor Swift</a>
+            <a href="/sabrina-carpenter">Sabrina Carpenter</a>
+            <a href="/chappell-roan">Chappell Roan</a>
+            <a href="/olivia-rodrigo">Olivia Rodrigo</a>
+            <a href="/billie-eilish">Billie Eilish</a>
+            <a href="/eminem">Eminem</a>
+            <a href="/kendrick-lamar">Kendrick Lamar</a>
+            <a href="/the-weeknd">The Weeknd</a>
+            <a href="/bruno-mars">Bruno Mars</a>
+            <a href="/queen">Queen</a>
+        </nav>
         <p>
           View this project on
           <a href="https://github.com/wyOmar/tuneTyper" target="_blank"
             >GitHub</a>
         </p>
       </footer>
-    <script src="script.js"></script>
+    <script src="/script.js"></script>
     <!-- Cloudflare Web Analytics --><script type='module' src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "4088f224269043c5b16b40798b2b71da"}'></script><!-- End Cloudflare Web Analytics -->
 
 
-    <script type="application/ld+json">
+    <script id="structured-data" type="application/ld+json">
         {
           "@context": "https://schema.org",
           "@type": "WebSite",

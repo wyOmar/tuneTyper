@@ -717,6 +717,13 @@ h1 {
     border-bottom: 2px solid #333; 
 }
 
+.navbar-brand {
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
+    color: inherit;
+}
+
 .navbar-logo {
     height: 32px; 
     width: 32px;
@@ -880,4 +887,32 @@ h1 {
     color: inherit;
     text-decoration: underline;
 }
-  
+
+.artist-seo-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 6px 12px;
+    max-width: 800px;
+    margin: 0 auto 8px;
+    padding: 0 20px;
+    font-size: 12px;
+    font-family: monospace;
+    color: #666;
+}
+
+.artist-seo-label {
+    color: #777;
+}
+
+.artist-seo-links a {
+    color: #777;
+    text-decoration: none;
+    transition: color 0.15s ease;
+}
+
+.artist-seo-links a:hover {
+    color: #4caf50;
+    text-decoration: underline;
+}
