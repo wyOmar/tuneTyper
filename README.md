@@ -7,6 +7,8 @@ A browser-based typing game that challenges users to type song lyrics. The game 
 
 - **Artist and Song Search**: Search for songs by artist or song name.
 - **Lyrics Typing Challenge**: Type out lyrics to improve typing speed.
+- **Live Character Highlighting**: Like TypeRacer/Monkeytype, each character of the current word turns green or red as you type it.
+- **Typing Options**: Monkeytype-style toggles for punctuation, numbers, and ad-libs (punctuation and numbers are off by default).
 - **WPM Measurement**: Real-time calculation of typing speed in words per minute.
 - **Interactive UI**: Modern and responsive design with real-time feedback.
 

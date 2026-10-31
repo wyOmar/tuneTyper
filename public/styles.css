@@ -71,13 +71,79 @@ h1 {
     background-color: #a8a8a8;
 }
 
-/* Checkbox Label */
-.checkbox-label {
-    font-size: 14px;
-    color: #fff;
+/* Config Bar (Monkeytype-style toggles) */
+.config-bar {
+    --config-bg: #2c2e31;
+    --config-inactive: #646669;
+    --config-hover: #d1d0c5;
+    --config-active: #e2b714;
     display: flex;
     align-items: center;
-    gap: 5px;
+    justify-content: center;
+    gap: 4px;
+    width: fit-content;
+    margin: 0 auto 20px;
+    padding: 6px 12px;
+    background: var(--config-bg);
+    border-radius: 8px;
+    font-family: monospace;
+    font-size: 14px;
+}
+
+.config-toggle {
+    cursor: pointer;
+    user-select: none;
+}
+
+.config-toggle-text {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 5px;
+    color: var(--config-inactive);
+    transition: color 0.15s;
+}
+
+.config-toggle:hover .config-toggle-text {
+    color: var(--config-hover);
+}
+
+.config-toggle input:checked ~ .config-toggle-text {
+    color: var(--config-active);
+}
+
+.config-toggle input:focus-visible ~ .config-toggle-text {
+    outline: 2px solid var(--config-hover);
+}
+
+.config-toggle input:disabled ~ .config-toggle-text {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.config-icon {
+    font-weight: bold;
+}
+
+.config-divider {
+    width: 4px;
+    height: 20px;
+    margin: 0 6px;
+    border-radius: 2px;
+    background: #1e1e1e;
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
 }
 
 /* Game Section */
@@ -97,10 +163,11 @@ h1 {
     height: 85px;
     overflow-y: auto;
     color: #fff;
+    position: relative; /* so word offsetTop is relative to this box (auto-scroll) */
 }
 
-.text-display span {
-    transition: 0.2s;
+.text-display .word {
+    transition: color 0.2s;
 }
 
 .text-display .current {
@@ -114,6 +181,24 @@ h1 {
 
 .text-display .incorrect {
     color: #f44336;
+}
+
+/* Per-character feedback for the word being typed */
+.text-display .char.incorrect {
+    background-color: rgba(244, 67, 54, 0.25);
+}
+
+.text-display .char.extra {
+    color: #a3221a;
+    background-color: rgba(244, 67, 54, 0.25);
+}
+
+.text-display .char.caret {
+    box-shadow: inset 2px 0 0 #e2b714;
+}
+
+.text-display .char.caret-end {
+    box-shadow: inset -2px 0 0 #e2b714;
 }
 
 /* Typing Area */
@@ -290,6 +375,7 @@ h1 {
     margin-bottom: 15px;
     overflow-y: auto;
     line-height: 1.5;
+    position: relative; /* so .selectedLyrics offsetTop is relative to this box */
     scrollbar-width: none; 
     -ms-overflow-style: none; 
 }
