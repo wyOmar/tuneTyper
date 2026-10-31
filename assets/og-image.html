@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<!--
+  Source for public/og-image.png (1200x630 social preview card).
+  Regenerate with:
+    firefox --headless --window-size=1200,630 --screenshot public/og-image.png "file://$PWD/assets/og-image.html"
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+        background: #121212;
+        color: #fff;
+        font-family: "DejaVu Sans", Arial, sans-serif;
+    }
+    .frame {
+        position: absolute;
+        inset: 0;
+        padding: 56px 72px;
+        display: flex;
+        flex-direction: column;
+        background:
+            radial-gradient(circle at 88% 12%, rgba(76, 175, 80, 0.18), transparent 42%),
+            radial-gradient(circle at 6% 100%, rgba(76, 175, 80, 0.10), transparent 40%),
+            #121212;
+    }
+    .brand {
+        display: flex;
+        align-items: center;
+        gap: 22px;
+    }
+    .brand img {
+        width: 72px;
+        height: 72px;
+        border-radius: 14px;
+    }
+    .brand h1 {
+        font-family: "DejaVu Sans Mono", monospace;
+        font-size: 64px;
+        font-weight: bold;
+        letter-spacing: -1px;
+    }
+    .brand h1 .cursor {
+        display: inline-block;
+        width: 6px;
+        height: 58px;
+        margin-left: 6px;
+        vertical-align: -6px;
+        background: #4caf50;
+    }
+    .tagline {
+        margin-top: 22px;
+        font-size: 34px;
+        color: #d1d1d1;
+    }
+    .tagline strong { color: #4caf50; font-weight: bold; }
+
+    /* Mock of the in-game text display */
+    .display {
+        margin-top: 56px;
+        padding: 28px 32px;
+        background: #1e1e1e;
+        border: 2px solid #333;
+        border-radius: 12px;
+        font-family: "DejaVu Sans Mono", monospace;
+        font-size: 38px;
+        line-height: 1.6;
+        color: #fff;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    }
+    .display .done { color: #4caf50; }
+    .display .current { text-decoration: underline; text-underline-offset: 6px; }
+    .display .ok { color: #4caf50; }
+    .display .bad { color: #f44336; background: rgba(244, 67, 54, 0.25); }
+    .display .caret { box-shadow: inset 3px 0 0 #d1d1d1; }
+    .display .todo { color: #888; }
+
+    .footer {
+        margin-top: auto;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-family: "DejaVu Sans Mono", monospace;
+    }
+    .wpm {
+        font-size: 44px;
+        font-weight: bold;
+        color: #4caf50;
+    }
+    .wpm span { font-size: 26px; color: #888; font-weight: normal; margin-left: 10px; }
+    .url {
+        font-size: 28px;
+        color: #d1d1d1;
+        padding: 12px 22px;
+        border: 2px solid #333;
+        border-radius: 10px;
+        background: #1e1e1e;
+    }
+</style>
+</head>
+<body>
+    <div class="frame">
+        <div class="brand">
+            <img src="../public/favicon/android-chrome-512x512.png" alt="">
+            <h1>TuneTyper<span class="cursor"></span></h1>
+        </div>
+        <p class="tagline">Type the lyrics. <strong>Guess the song.</strong> Beat your WPM.</p>
+
+        <div class="display">
+            <span class="done">and I'm singing every word of</span>
+            <span class="current"><span class="ok">t</span><span class="ok">h</span><span class="caret">e</span></span>
+            <span class="todo">song that you love, can you guess the tune?</span>
+        </div>
+
+        <div class="footer">
+            <div class="wpm">87 WPM<span>98% acc</span></div>
+            <div class="url">type.vincentchan.uk</div>
+        </div>
+    </div>
+</body>
+</html>
