@@ -279,14 +279,40 @@ h1 {
 /* Guess Section */
 .guess-section {
     text-align: center;
-    margin-top: 20px;
+    margin-top: 18px;
 }
 
 .guess-heading {
-    margin-bottom: 12px;
-    font-size: 22px;
-    color: #fff;
-    font-family: Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 0 0 16px;
+    font-family: monospace;
+    font-size: 14px;
+    font-weight: bold;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #d1d1d1;
+}
+
+.guess-heading::before,
+.guess-heading::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: #333;
+}
+
+.guess-heading-content {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.guess-heading-icon {
+    color: #4caf50;
+    flex-shrink: 0;
 }
 
 /* Mystery Title Pattern */
@@ -425,22 +451,9 @@ h1 {
 
 .blur-stage-1 { filter: blur(24px) contrast(1.1); }
 .blur-stage-2 { filter: blur(16px) contrast(1.05); }
-.blur-stage-3 { filter: blur(9px); }
-.blur-stage-4 { filter: blur(4px); }
+.blur-stage-3,
+.blur-stage-4,
 .blur-stage-5 { filter: blur(0px); }
-
-.hint-cover-label {
-    position: absolute;
-    bottom: 2px;
-    left: 0;
-    right: 0;
-    background: rgba(0, 0, 0, 0.7);
-    color: #bbb;
-    font-size: 10px;
-    font-family: monospace;
-    text-align: center;
-    padding: 1px 0;
-}
 
 .hint-details-box {
     flex: 1;

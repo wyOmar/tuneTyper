@@ -32,9 +32,11 @@ app.get('/tracks', async (req, res) => {
 app.get('/top-tracks', async (req, res) => {
     const { artistId } = req.query;
     if (!artistId) return res.status(400).send('Artist ID is required.');
+    const parsedLimit = parseInt(req.query.limit, 10);
+    const limit = (!isNaN(parsedLimit) && parsedLimit > 0) ? Math.min(100, parsedLimit) : 50;
 
     try {
-        const response = await axios.get(`https://api.deezer.com/artist/${encodeURIComponent(artistId)}/top?limit=50`);
+        const response = await axios.get(`https://api.deezer.com/artist/${encodeURIComponent(artistId)}/top?limit=${limit}`);
         res.json(response.data);
     } catch (error) {
         console.error('Error fetching top tracks:', error.message);

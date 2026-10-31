@@ -63,9 +63,11 @@ let snippetProgressAnim = null;
 let isSnippetPlaying = false;
 let attemptHistory = []; // stores 'wrong', 'skipped', or 'correct'
 let candidateSongs = [];
+let artistCandidateCache = {};
 let trackExtraDetails = null;
 let suggestionSelectedIndex = -1;
 let debounceSuggestTimeout = null;
+let suggestRequestId = 0;
 // Lyrics variables
 let sectionOne = "";
 let sectionTwo = "";
@@ -106,8 +108,9 @@ async function fetchArtistId(artistName) {
     return mostFrequentArtistId;
 }
 
-async function fetchTopTracks(artistId) {
-    const response = await fetch(`/top-tracks?artistId=${artistId}`);
+async function fetchTopTracks(artistId, limit = 50) {
+    const limitParam = limit !== 50 ? `&limit=${encodeURIComponent(limit)}` : '';
+    const response = await fetch(`/top-tracks?artistId=${encodeURIComponent(artistId)}${limitParam}`);
     if (!response.ok) throw new Error('Failed to fetch top tracks.');
     const data = await response.json();
     return data.data;
@@ -145,6 +148,7 @@ async function loadDefaultPlaylist() {
                 cachedSongLyrics[`${trackArtist}-${trackTitle}`] = lyrics;
 
                 selectedTrack = randomTrack;
+                ensureSelectedArtistCandidates();
                 typeSection = extractRandomSection(lyrics);
                 updateDisplayedText();
                 endGameBtn.style.display = 'inline-block';
@@ -340,7 +344,10 @@ function resetGame(preserveChallenge = false) {
     if (guessSection) guessSection.style.display = 'none';
     if (guessInput) guessInput.value = '';
     if (guessInputContainer) guessInputContainer.classList.remove('shake');
-    if (mysteryTitle) mysteryTitle.innerHTML = '';
+    if (mysteryTitle) {
+        mysteryTitle.innerHTML = '';
+        mysteryTitle.style.display = 'none';
+    }
     if (removePunctuationCheckbox) removePunctuationCheckbox.disabled = false;
     if (removeAdlibsCheckbox) removeAdlibsCheckbox.disabled = false;
     if (includeNumbersCheckbox) includeNumbersCheckbox.disabled = false;
@@ -487,26 +494,137 @@ function formatDuration(seconds) {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
 }
 
+function normalizeArtistName(name) {
+    return (name || '')
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+}
+
+function isTrackBySelectedArtist(track) {
+    if (!selectedTrack || !selectedTrack.artist || !track) return false;
+    const targetId = selectedTrack.artist.id ? String(selectedTrack.artist.id) : null;
+    const targetName = normalizeArtistName(selectedTrack.artist.name);
+
+    const matchesArtistObj = (artistObj) => {
+        if (!artistObj) return false;
+        if (targetId && artistObj.id && String(artistObj.id) === targetId) return true;
+        const candName = normalizeArtistName(artistObj.name);
+        return Boolean(targetName && candName === targetName);
+    };
+
+    if (matchesArtistObj(track.artist)) return true;
+    if (Array.isArray(track.contributors) && track.contributors.some(matchesArtistObj)) {
+        return true;
+    }
+    return false;
+}
+
+function normalizeSuggestionText(str) {
+    return (str || '')
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[\u2018\u2019\u201A\u201B`]/g, "'")
+        .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function stripSuggestionPunctuation(str) {
+    return normalizeSuggestionText(str)
+        .replace(/[^a-z0-9\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function getSuggestionMatchRank(title, query) {
+    const normQuery = normalizeSuggestionText(query);
+    if (!normQuery) return 0;
+    const normTitle = normalizeSuggestionText(title);
+    if (normTitle.startsWith(normQuery)) return 3;
+    if (normTitle.includes(normQuery)) return 2;
+
+    const strippedQuery = stripSuggestionPunctuation(query);
+    if (strippedQuery) {
+        const strippedTitle = stripSuggestionPunctuation(title);
+        if (strippedTitle.startsWith(strippedQuery)) return 2;
+        if (strippedTitle.includes(strippedQuery)) return 1;
+    }
+    return 0;
+}
+
 function populateCandidateSongs() {
     candidateSongs = [];
+    if (!selectedTrack || !selectedTrack.artist) return;
+
+    const targetArtistName = selectedTrack.artist.name || '';
     const seen = new Set();
+
+    const addCandidateTitle = (rawTitle) => {
+        const clean = removeParentheses(rawTitle || '').trim();
+        if (!clean) return;
+        const key = stripSuggestionPunctuation(clean) || clean.toLowerCase();
+        if (!seen.has(key)) {
+            seen.add(key);
+            candidateSongs.push({ title: clean, artist: targetArtistName });
+        }
+    };
 
     if (artistTracks && artistTracks.length > 0) {
         artistTracks.forEach(t => {
-            const clean = removeParentheses(t.title).trim();
-            if (clean && !seen.has(clean.toLowerCase())) {
-                seen.add(clean.toLowerCase());
-                candidateSongs.push({ title: clean, artist: t.artist.name });
+            if (isTrackBySelectedArtist(t)) {
+                addCandidateTitle(t.title);
             }
         });
     }
 
-    if (selectedTrack) {
-        const cleanSelected = removeParentheses(selectedTrack.title).trim();
-        if (cleanSelected && !seen.has(cleanSelected.toLowerCase())) {
-            seen.add(cleanSelected.toLowerCase());
-            candidateSongs.push({ title: cleanSelected, artist: selectedTrack.artist.name });
+    const cacheKey = selectedTrack.artist.id
+        ? `id:${selectedTrack.artist.id}`
+        : `name:${normalizeArtistName(targetArtistName)}`;
+    const cachedCatalog = artistCandidateCache[cacheKey];
+    if (Array.isArray(cachedCatalog)) {
+        cachedCatalog.forEach(t => {
+            if (isTrackBySelectedArtist(t)) {
+                addCandidateTitle(t.title);
+            }
+        });
+    }
+
+    addCandidateTitle(selectedTrack.title);
+}
+
+async function ensureSelectedArtistCandidates() {
+    if (!selectedTrack || !selectedTrack.artist) return;
+    const targetArtistId = selectedTrack.artist.id;
+    const targetArtistName = selectedTrack.artist.name || '';
+    const cacheKey = targetArtistId
+        ? `id:${targetArtistId}`
+        : `name:${normalizeArtistName(targetArtistName)}`;
+
+    if (artistCandidateCache[cacheKey]) {
+        populateCandidateSongs();
+        return;
+    }
+
+    try {
+        let resolvedArtistId = targetArtistId;
+        if (!resolvedArtistId && targetArtistName) {
+            resolvedArtistId = await fetchArtistId(targetArtistName);
         }
+        if (!resolvedArtistId) return;
+
+        const tracks = await fetchTopTracks(resolvedArtistId, 100);
+        if (Array.isArray(tracks) && tracks.length > 0) {
+            artistCandidateCache[cacheKey] = tracks;
+            populateCandidateSongs();
+            if (guessSection && guessSection.style.display !== 'none' && guessInput && guessInput.value.trim()) {
+                filterAndShowSuggestions(guessInput.value);
+            }
+        }
+    } catch (err) {
+        console.warn('Could not preload artist candidate songs:', err);
     }
 }
 
@@ -538,6 +656,7 @@ function startGuessingPhase() {
     if (guessInputContainer) guessInputContainer.classList.remove('shake');
 
     populateCandidateSongs();
+    ensureSelectedArtistCandidates();
 
     if (selectedTrack && selectedTrack.id) {
         fetchTrackDetails(selectedTrack.id);
@@ -552,6 +671,15 @@ function startGuessingPhase() {
 
 function renderMysteryTitle() {
     if (!selectedTrack || !mysteryTitle) return;
+
+    // Hint 1 (0 guesses): do not reveal word spacing or word/letter counts yet
+    if (hintStage < 2) {
+        mysteryTitle.innerHTML = '';
+        mysteryTitle.style.display = 'none';
+        return;
+    }
+
+    mysteryTitle.style.display = 'flex';
     const cleanTitle = removeParentheses(selectedTrack.title).trim();
     const words = cleanTitle.split(/\s+/).filter(Boolean);
 
@@ -578,7 +706,7 @@ function renderMysteryTitle() {
         return `<span class="mystery-word">${charsHtml}</span>`;
     }).join(' ');
 
-    const summary = `<div style="width: 100%; text-align: center; font-size: 12px; color: #888; margin-top: 6px;">${words.length} word${words.length === 1 ? '' : 's'} • ${totalLetters} letters</div>`;
+    const summary = `<div style="width: 100%; text-align: center; font-size: 12px; color: #888; margin-top: 6px;">${words.length} word${words.length === 1 ? '' : 's'} \u2022 ${totalLetters} letters</div>`;
 
     mysteryTitle.innerHTML = wordsHtml + summary;
 }
@@ -617,7 +745,7 @@ function updateHintsUI() {
     updateAttemptTracker();
     updateSkipBtn();
 
-    // Progressive Album Cover
+    // Progressive Album Cover (unblurred starting at Hint 3)
     if (hintCoverImg) {
         if (selectedTrack.album && selectedTrack.album.cover_medium) {
             hintCoverImg.src = selectedTrack.album.cover_medium;
@@ -627,26 +755,29 @@ function updateHintsUI() {
     }
 
     // Progressive Metadata Badges:
-    // Hint 1: Artist
-    // Hint 2: Artist + Year
-    // Hint 3: Artist + Year + Album
-    // Hint 4: Artist + Year + Album + Track Length + Word Initials
-    // Hint 5: All above + Full 30s audio
+    // Hint 1 (0 guesses): Artist + blurred art + 2s snippet (no word/letter counts)
+    // Hint 2 (1 guess):   + Word spacing / letter counts + 5s snippet
+    // Hint 3 (2 guesses): + Album + Year + unblurred art + 10s snippet
+    // Hint 4 (3 guesses): + Track Length + Word Initials + 18s snippet
+    // Hint 5 (4 guesses): + Full 30s audio
     if (hintBadges) {
         const badges = [];
         badges.push(`<span class="meta-pill">🎤 Artist: <strong>${escapeHtml(selectedTrack.artist.name)}</strong></span>`);
 
         if (hintStage >= 2) {
-            if (trackExtraDetails && trackExtraDetails.release_date) {
-                const year = trackExtraDetails.release_date.split('-')[0];
-                badges.push(`<span class="meta-pill highlight">📅 Year: <strong>${escapeHtml(year)}</strong></span>`);
-            } else {
-                badges.push(`<span class="meta-pill highlight">💿 Studio Track</span>`);
-            }
+            badges.push(`<span class="meta-pill highlight">📏 Word spacing</span>`);
         }
 
-        if (hintStage >= 3 && selectedTrack.album && selectedTrack.album.title) {
-            badges.push(`<span class="meta-pill highlight">💿 Album: <strong>${escapeHtml(selectedTrack.album.title)}</strong></span>`);
+        if (hintStage >= 3) {
+            if (selectedTrack.album && selectedTrack.album.title) {
+                badges.push(`<span class="meta-pill highlight">💿 Album: <strong>${escapeHtml(selectedTrack.album.title)}</strong></span>`);
+            }
+            if (trackExtraDetails && trackExtraDetails.release_date) {
+                const year = trackExtraDetails.release_date.split('-')[0];
+                if (year) {
+                    badges.push(`<span class="meta-pill highlight">📅 Year: <strong>${escapeHtml(year)}</strong></span>`);
+                }
+            }
         }
 
         if (hintStage >= 4) {
@@ -832,6 +963,8 @@ function showSuggestions(list) {
 }
 
 function hideSuggestions() {
+    clearTimeout(debounceSuggestTimeout);
+    suggestRequestId++;
     if (guessSuggestions) {
         guessSuggestions.style.display = 'none';
         guessSuggestions.innerHTML = '';
@@ -840,34 +973,51 @@ function hideSuggestions() {
 }
 
 function filterAndShowSuggestions(query) {
-    if (!query) {
+    clearTimeout(debounceSuggestTimeout);
+    const requestId = ++suggestRequestId;
+
+    if (!query || !query.trim()) {
         hideSuggestions();
         return;
     }
 
-    const q = query.toLowerCase().trim();
-    const matches = candidateSongs.filter(s => s.title.toLowerCase().includes(q)).slice(0, 6);
+    const rankedMatches = candidateSongs
+        .map(s => ({ song: s, rank: getSuggestionMatchRank(s.title, query) }))
+        .filter(entry => entry.rank > 0)
+        .sort((a, b) => b.rank - a.rank)
+        .map(entry => entry.song)
+        .slice(0, 6);
 
-    if (matches.length > 0) {
-        showSuggestions(matches);
-    } else {
-        clearTimeout(debounceSuggestTimeout);
+    if (rankedMatches.length > 0) {
+        showSuggestions(rankedMatches);
+    } else if (selectedTrack && selectedTrack.artist && selectedTrack.artist.name) {
+        const targetArtistName = selectedTrack.artist.name;
+        const currentQuery = query.trim();
         debounceSuggestTimeout = setTimeout(async () => {
             try {
-                const res = await fetch(`/tracks?artist=${encodeURIComponent(query)}`);
+                const searchStr = `${targetArtistName} ${currentQuery}`;
+                const res = await fetch(`/tracks?artist=${encodeURIComponent(searchStr)}`);
+                if (requestId !== suggestRequestId) return;
                 if (res.ok) {
                     const data = await res.json();
+                    if (requestId !== suggestRequestId) return;
                     if (data.data && data.data.length > 0) {
                         const fetchedMatches = [];
                         const seen = new Set();
-                        data.data.slice(0, 6).forEach(t => {
+                        data.data.forEach(t => {
+                            if (!isTrackBySelectedArtist(t)) return;
                             const clean = removeParentheses(t.title).trim();
-                            if (clean && !seen.has(clean.toLowerCase())) {
-                                seen.add(clean.toLowerCase());
-                                fetchedMatches.push({ title: clean, artist: t.artist.name });
+                            const key = stripSuggestionPunctuation(clean) || clean.toLowerCase();
+                            if (clean && !seen.has(key) && getSuggestionMatchRank(clean, currentQuery) > 0) {
+                                seen.add(key);
+                                fetchedMatches.push({ title: clean, artist: targetArtistName });
                             }
                         });
-                        showSuggestions(fetchedMatches);
+                        if (fetchedMatches.length > 0) {
+                            showSuggestions(fetchedMatches.slice(0, 6));
+                        } else {
+                            hideSuggestions();
+                        }
                     } else {
                         hideSuggestions();
                     }
@@ -876,6 +1026,8 @@ function filterAndShowSuggestions(query) {
                 console.warn('Error fetching suggestions:', err);
             }
         }, 250);
+    } else {
+        hideSuggestions();
     }
 }
 
@@ -1964,6 +2116,15 @@ if (typeof module !== 'undefined' && module.exports) {
         generateShareText,
         extractRandomSection,
         loadSharedChallenge,
+        startGuessingPhase,
+        renderMysteryTitle,
+        updateHintsUI,
+        skipGuess,
+        handleGuess,
+        populateCandidateSongs,
+        filterAndShowSuggestions,
+        isTrackBySelectedArtist,
+        getSuggestionMatchRank,
         _getState: () => ({
             totalKeystrokes,
             errorKeystrokes,
@@ -1983,6 +2144,15 @@ if (typeof module !== 'undefined' && module.exports) {
             gaveUp,
             attemptHistory,
             guessCount,
+            hintStage,
+            artistTracks,
+            candidateSongs,
+            artistCandidateCache,
+            trackExtraDetails,
+            mysteryTitle,
+            hintCoverImg,
+            hintBadges,
+            guessSuggestions,
             removePunctuationCheckbox,
             includeNumbersCheckbox,
             removeAdlibsCheckbox
@@ -2006,6 +2176,11 @@ if (typeof module !== 'undefined' && module.exports) {
             if ('gaveUp' in state) gaveUp = state.gaveUp;
             if ('attemptHistory' in state) attemptHistory = state.attemptHistory;
             if ('guessCount' in state) guessCount = state.guessCount;
+            if ('hintStage' in state) hintStage = state.hintStage;
+            if ('artistTracks' in state) artistTracks = state.artistTracks;
+            if ('candidateSongs' in state) candidateSongs = state.candidateSongs;
+            if ('artistCandidateCache' in state) artistCandidateCache = state.artistCandidateCache;
+            if ('trackExtraDetails' in state) trackExtraDetails = state.trackExtraDetails;
         }
     };
 }
