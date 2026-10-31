@@ -383,6 +383,111 @@ function escapeHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
+const UNWANTED_ARTIST_PATTERNS = [
+    /\b(piano covers?|piano version)\b/i,
+    /\bkaraoke\b/i,
+    /\binstrumental\b/i,
+    /\bbacking tracks?\b/i,
+    /\btribute\b/i,
+    /\b(?:lullaby|rockabye)\b/i,
+    /\b(?:string quartet)\b/i,
+    /\b(?:covers? club|covers? band)\b/i
+];
+
+const UNWANTED_TITLE_PATTERNS = [
+    /\b(?:piano covers?|piano version)\b/i,
+    /\b(?:karaoke|karaoke version)\b/i,
+    /\b(?:instrumental|instrumental version)\b/i,
+    /\bbacking tracks?\b/i,
+    /\b(?:originally performed by|in the style of|tribute to)\b/i,
+    /\b(?:guitar covers?|drum covers?|bass covers?)\b/i,
+    /\b(?:lullaby version|8[- ]?bit version)\b/i,
+    /\b(?:orchestral cover|orchestral version)\b/i
+];
+
+/**
+ * Identifies instrumental, piano cover, karaoke, and tribute tracks that
+ * do not have published vocal lyrics in lyrics databases.
+ */
+function isUnwantedTrack(track) {
+    if (!track) return false;
+    const artist = (track.artist && (typeof track.artist === 'object' ? track.artist.name : track.artist)) || '';
+    const title = track.title || '';
+    const titleVersion = track.title_version || '';
+
+    if (UNWANTED_ARTIST_PATTERNS.some((p) => p.test(artist))) return true;
+    if (UNWANTED_TITLE_PATTERNS.some((p) => p.test(title) || p.test(titleVersion))) return true;
+    return false;
+}
+
+let toastDismissTimeout = null;
+
+/**
+ * Displays a non-intrusive toast notification replacing the jarring browser alert() modal.
+ */
+function showToast(message, type = 'error', duration = 4000) {
+    if (typeof document === 'undefined') return null;
+
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container';
+        container.setAttribute('aria-live', 'polite');
+        container.setAttribute('aria-atomic', 'true');
+        document.body.appendChild(container);
+    }
+
+    if (toastDismissTimeout) {
+        clearTimeout(toastDismissTimeout);
+        toastDismissTimeout = null;
+    }
+
+    container.innerHTML = '';
+
+    const toast = document.createElement('div');
+    toast.className = `toast-notification toast-${type}`;
+
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'toast-icon';
+    iconSpan.setAttribute('aria-hidden', 'true');
+    iconSpan.textContent = type === 'success' ? '✓' : (type === 'warning' ? '⚠️' : '⚠️');
+
+    const msgSpan = document.createElement('span');
+    msgSpan.className = 'toast-message';
+    msgSpan.textContent = String(message || '');
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'toast-close-btn';
+    closeBtn.setAttribute('aria-label', 'Close notification');
+    closeBtn.innerHTML = '&times;';
+
+    toast.appendChild(iconSpan);
+    toast.appendChild(msgSpan);
+    toast.appendChild(closeBtn);
+    container.appendChild(toast);
+
+    function dismiss() {
+        if (toastDismissTimeout) {
+            clearTimeout(toastDismissTimeout);
+            toastDismissTimeout = null;
+        }
+        toast.classList.add('toast-hiding');
+        setTimeout(() => {
+            if (toast.parentNode === container) {
+                container.removeChild(toast);
+            }
+        }, 260);
+    }
+
+    closeBtn.addEventListener('click', dismiss);
+    if (duration > 0) {
+        toastDismissTimeout = setTimeout(dismiss, duration);
+    }
+
+    return toast;
+}
+
 function normalizeText(text) {
     return text
         .normalize('NFKD')
@@ -1079,7 +1184,7 @@ async function playSnippet() {
     }
 
     if (!selectedTrack || !selectedTrack.preview) {
-        alert('Audio snippet preview unavailable for this track.');
+        showToast('Audio snippet preview unavailable for this track.', 'warning');
         return;
     }
 
@@ -2085,6 +2190,7 @@ function buildOmniboxSuggestions(query, remoteData = null) {
     const artistMap = new Map();
     const addCandidateArtist = (name, picture = '', id = null) => {
         if (!name) return;
+        if (UNWANTED_ARTIST_PATTERNS.some((p) => p.test(name))) return;
         const key = normOmnibox(name);
         if (!key) return;
         const existing = artistMap.get(key);
@@ -2125,6 +2231,7 @@ function buildOmniboxSuggestions(query, remoteData = null) {
         const cleanTitle = removeParentheses(String(title || '')).trim() || String(title || '').trim();
         const cleanArtist = String(artist || '').trim();
         if (!cleanTitle || !cleanArtist) return;
+        if (isUnwantedTrack({ title: cleanTitle, artist: cleanArtist })) return;
         const key = `${normOmnibox(cleanArtist)}::${normOmnibox(cleanTitle)}`;
         if (!songMap.has(key)) {
             songMap.set(key, { title: cleanTitle, artist: cleanArtist, cover: cover || '' });
@@ -2133,13 +2240,17 @@ function buildOmniboxSuggestions(query, remoteData = null) {
 
     if (Array.isArray(artistTracks)) {
         artistTracks.forEach(t => {
-            if (t && t.title && t.artist && t.artist.name) {
+            if (t && t.title && t.artist && t.artist.name && !isUnwantedTrack(t)) {
                 addCandidateSong(t.title, t.artist.name, (t.album && t.album.cover_small) || '');
             }
         });
     }
     if (remoteData && Array.isArray(remoteData.tracks)) {
-        remoteData.tracks.forEach(t => addCandidateSong(t.title, t.artist, t.cover));
+        remoteData.tracks.forEach(t => {
+            if (!isUnwantedTrack(t)) {
+                addCandidateSong(t.title, t.artist, t.cover);
+            }
+        });
     }
 
     const rankedSongs = [];
@@ -2237,7 +2348,7 @@ async function selectOmniboxItem(item) {
             await handleArtistSearch(item.name, item.id || null);
             if (typingArea && !typingArea.disabled) typingArea.focus();
         } catch (error) {
-            alert(error.message);
+            showToast(error.message, 'error');
         } finally {
             if (startBtn) startBtn.disabled = false;
         }
@@ -2252,7 +2363,7 @@ async function selectOmniboxItem(item) {
             await handleSongSearch(`${item.artist} ${item.title}`, item.artist, item.title);
             if (typingArea && !typingArea.disabled) typingArea.focus();
         } catch (error) {
-            alert(error.message);
+            showToast(error.message, 'error');
         } finally {
             if (startBtn) startBtn.disabled = false;
         }
@@ -2467,7 +2578,7 @@ if (startBtn) {
             }
             if (typingArea && !typingArea.disabled) typingArea.focus();
         } catch (error) {
-            alert(error.message);
+            showToast(error.message, 'error');
         } finally {
             startBtn.disabled = false;
         }
@@ -2768,7 +2879,7 @@ function bindArtistTrackCards(typingSpeed = 22) {
                 await handleSongSearch(query, artist, track);
                 if (typingArea && !typingArea.disabled) typingArea.focus();
             } catch (error) {
-                alert(error.message);
+                showToast(error.message, 'error');
             } finally {
                 stopLoadingBar();
             }
@@ -2879,11 +2990,16 @@ async function handleSongSearch(songName, preferredArtist = '', preferredTitle =
 
         if (!data.data || data.data.length === 0) throw new Error('No matching tracks found for the song.');
 
-        let topSearchResult = data.data[0];
+        let topSearchResult = data.data.find(t => !isUnwantedTrack(t)) || data.data[0];
         if (preferredArtist && preferredTitle) {
             const pArtistNorm = normOmnibox(preferredArtist);
             const pTitleNorm = normOmnibox(preferredTitle);
             const exact = data.data.find(t =>
+                !isUnwantedTrack(t) &&
+                t.artist &&
+                normOmnibox(t.artist.name) === pArtistNorm &&
+                (normOmnibox(t.title_short || t.title) === pTitleNorm || normOmnibox(t.title).includes(pTitleNorm))
+            ) || data.data.find(t =>
                 t.artist &&
                 normOmnibox(t.artist.name) === pArtistNorm &&
                 (normOmnibox(t.title_short || t.title) === pTitleNorm || normOmnibox(t.title).includes(pTitleNorm))
@@ -2906,7 +3022,7 @@ async function handleSongSearch(songName, preferredArtist = '', preferredTitle =
         updateDisplayedText();
         endGameBtn.style.display = 'inline-block';
     } catch (error) {
-        throw new Error(`Lyrics not found for the song: ${songName}`);
+        throw new Error(`Lyrics not found for "${songName}". Try another track or artist.`);
     }
 }
 
@@ -3064,6 +3180,10 @@ if (typeof module !== 'undefined' && module.exports) {
         cancelInputTyping,
         bindArtistTrackCards,
         syncShelfVisibility,
+        showToast,
+        isUnwantedTrack,
+        UNWANTED_ARTIST_PATTERNS,
+        UNWANTED_TITLE_PATTERNS,
         _getState: () => ({
             totalKeystrokes,
             errorKeystrokes,
