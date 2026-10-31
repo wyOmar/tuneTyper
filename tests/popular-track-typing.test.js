@@ -207,8 +207,8 @@ global.fetch = async (url) => {
 const scriptModule = require('../public/script');
 
 test('Popular tracks search-bar typing effect & Go replay behavior', async (t) => {
-    await t.test('fakeTypeValue types text character-by-character into an input element', async () => {
-        const mockInput = { value: 'Taylor Swift' };
+    await t.test('fakeTypeValue types from empty character-by-character into an input element', async () => {
+        const mockInput = { value: '' };
         const observedFrames = [];
 
         const origSetTimeout = global.setTimeout;
@@ -219,12 +219,90 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
 
         try {
             const typingPromise = scriptModule.fakeTypeValue(mockInput, 'Queen - Killer Queen', 5);
-            // First character is typed immediately upon starting
             assert.equal(mockInput.value, 'Q');
             await typingPromise;
             assert.equal(mockInput.value, 'Queen - Killer Queen');
             assert.ok(observedFrames.includes('Qu'), 'Should step through progressive prefixes');
             assert.ok(observedFrames.includes('Queen - '), 'Should include intermediate typed prefix');
+        } finally {
+            global.setTimeout = origSetTimeout;
+        }
+    });
+
+    await t.test('fakeTypeValue smartly backspaces only mismatched suffix and types the new suffix (Sabrina Carpenter - Feather -> Espresso)', async () => {
+        const mockInput = { value: 'Sabrina Carpenter - Feather' };
+        const frames = [];
+
+        const origSetTimeout = global.setTimeout;
+        global.setTimeout = (fn, delay) => origSetTimeout(() => {
+            frames.push(mockInput.value);
+            fn();
+        }, Math.min(delay, 2));
+
+        try {
+            const typingPromise = scriptModule.fakeTypeValue(mockInput, 'Sabrina Carpenter - Espresso', 4);
+            // First step immediately deletes the last character ('r')
+            assert.equal(mockInput.value, 'Sabrina Carpenter - Feathe');
+            frames.unshift(mockInput.value);
+            await typingPromise;
+
+            assert.equal(mockInput.value, 'Sabrina Carpenter - Espresso');
+
+            // Verify every single frame kept "Sabrina Carpenter - " intact!
+            for (const frame of frames) {
+                assert.ok(
+                    frame.startsWith('Sabrina Carpenter - '),
+                    `Expected frame "${frame}" to keep shared prefix "Sabrina Carpenter - "`
+                );
+            }
+
+            const pivotIdx = frames.indexOf('Sabrina Carpenter - ');
+            assert.ok(pivotIdx > 0, 'Should backspace cleanly down to "Sabrina Carpenter - "');
+            assert.ok(frames.indexOf('Sabrina Carpenter - Feath') < pivotIdx, 'Should backspace Feather before pivot');
+            assert.ok(frames.indexOf('Sabrina Carpenter - E') > pivotIdx, 'Should type Espresso after pivot');
+            assert.ok(frames.indexOf('Sabrina Carpenter - Espr') > pivotIdx, 'Should progressively type Espresso');
+        } finally {
+            global.setTimeout = origSetTimeout;
+        }
+    });
+
+    await t.test('fakeTypeValue appends " - Track" directly when input already contains the artist name', async () => {
+        const mockInput = { value: 'Sabrina Carpenter' };
+        const frames = [];
+
+        const origSetTimeout = global.setTimeout;
+        global.setTimeout = (fn, delay) => origSetTimeout(() => {
+            frames.push(mockInput.value);
+            fn();
+        }, Math.min(delay, 2));
+
+        try {
+            const typingPromise = scriptModule.fakeTypeValue(mockInput, 'Sabrina Carpenter - Feather', 4);
+            // Should NOT delete "Sabrina Carpenter"; first step appends space
+            assert.equal(mockInput.value, 'Sabrina Carpenter ');
+            await typingPromise;
+            assert.equal(mockInput.value, 'Sabrina Carpenter - Feather');
+            for (const frame of frames) {
+                assert.ok(frame.startsWith('Sabrina Carpenter'), `Frame "${frame}" should never delete artist prefix`);
+            }
+        } finally {
+            global.setTimeout = origSetTimeout;
+        }
+    });
+
+    await t.test('fakeTypeValue leaves input untouched with zero flicker when selecting the exact same song again', async () => {
+        const mockInput = { value: 'Sabrina Carpenter - Espresso' };
+        let timerScheduled = false;
+        const origSetTimeout = global.setTimeout;
+        global.setTimeout = (fn, delay) => {
+            timerScheduled = true;
+            return origSetTimeout(fn, delay);
+        };
+
+        try {
+            await scriptModule.fakeTypeValue(mockInput, 'Sabrina Carpenter - Espresso', 22);
+            assert.equal(mockInput.value, 'Sabrina Carpenter - Espresso');
+            assert.equal(timerScheduled, false, 'No delete/type timers needed when value already matches');
         } finally {
             global.setTimeout = origSetTimeout;
         }
@@ -302,21 +380,21 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
         assert.equal(typingArea.focused, true);
     });
 
-    await t.test('Pressing Go mid-animation snaps #artist-input to the full song query and replays that song', async () => {
+    await t.test('Pressing Go mid-backspace/type animation snaps #artist-input to the full song query and replays that song', async () => {
         const artistInput = getOrCreateElement('artist-input');
         const startBtn = getOrCreateElement('start-btn');
+        artistInput.value = 'Taylor Swift - Cruel Summer';
 
         const cruelSummerCard = createTrackCard('Taylor Swift', 'Cruel Summer');
         const antiHeroCard = createTrackCard('Taylor Swift', 'Anti-Hero');
         trackCards = [cruelSummerCard, antiHeroCard];
 
-        // Use slow typing speed (80ms/char) so clicking Go immediately catches it mid-typing
+        // Use slow typing speed (80ms/char) so clicking Go immediately catches it mid-backspace
         scriptModule.bindArtistTrackCards(80);
 
         await antiHeroCard.click();
-        // Right after click resolves, typing has only typed the first 1-2 characters
-        assert.notEqual(artistInput.value, 'Taylor Swift - Anti-Hero');
-        assert.ok('Taylor Swift - Anti-Hero'.startsWith(artistInput.value));
+        // Right after click resolves, smart backspace has only deleted 1 character ('r') from "Cruel Summer"
+        assert.equal(artistInput.value, 'Taylor Swift - Cruel Summe');
 
         // Clicking Go mid-animation should snap to full "Taylor Swift - Anti-Hero" and load Anti-Hero
         await startBtn.click();
@@ -327,8 +405,9 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
         assert.equal(antiHeroCard.classList.contains('active'), true);
     });
 
-    await t.test('Clicking another popular track mid-animation cleanly cancels prior typing without interleaving characters', async () => {
+    await t.test('Clicking another popular track mid-animation smartly backspaces partial progress and types the new track', async () => {
         const artistInput = getOrCreateElement('artist-input');
+        artistInput.value = 'Taylor Swift';
 
         const cruelSummerCard = createTrackCard('Taylor Swift', 'Cruel Summer');
         const antiHeroCard = createTrackCard('Taylor Swift', 'Anti-Hero');
@@ -336,9 +415,9 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
 
         scriptModule.bindArtistTrackCards(8);
 
-        // Start clicking Cruel Summer, then click Anti-Hero 15ms later mid-animation
+        // Start clicking Cruel Summer, then click Anti-Hero 25ms later mid-animation
         const firstClick = cruelSummerCard.click();
-        await new Promise((r) => setTimeout(r, 15));
+        await new Promise((r) => setTimeout(r, 25));
         const secondClick = antiHeroCard.click();
         await Promise.all([firstClick, secondClick]);
         await new Promise((r) => setTimeout(r, 300));

@@ -346,55 +346,84 @@ function cancelInputTyping(completeImmediately = false) {
     }
 }
 
-function fakeTypeValue(element, text, speed = 35) {
+function getCommonPrefixLength(a, b) {
+    const strA = String(a ?? '');
+    const strB = String(b ?? '');
+    const maxLen = Math.min(strA.length, strB.length);
+    let i = 0;
+    while (i < maxLen && strA.charAt(i) === strB.charAt(i)) {
+        i++;
+    }
+    return i;
+}
+
+function fakeTypeValue(element, text, speed = 22) {
     if (!element) return Promise.resolve();
     cancelInputTyping(false);
 
+    const currentText = String(element.value ?? '');
     const targetText = String(text ?? '');
-    const sessionId = ++inputTypingSessionId;
-    activeInputTypingElement = element;
-    activeInputTypingTarget = targetText;
-    element.value = '';
 
-    if (!targetText || speed <= 0) {
+    if (currentText === targetText || speed <= 0) {
         element.value = targetText;
         activeInputTypingTarget = null;
         activeInputTypingElement = null;
         return Promise.resolve();
     }
 
+    const sessionId = ++inputTypingSessionId;
+    activeInputTypingElement = element;
+    activeInputTypingTarget = targetText;
+
+    const prefixLen = getCommonPrefixLength(currentText, targetText);
+    let deleteRemaining = currentText.length - prefixLen;
+    let typeIndex = prefixLen;
+    const deleteSpeed = Math.max(1, Math.round(speed * 0.75));
+
     return new Promise((resolve) => {
         activeInputTypingResolve = resolve;
-        let index = 0;
 
-        function typeNextChar() {
+        function finish() {
+            activeInputTypingTimer = null;
+            activeInputTypingTarget = null;
+            activeInputTypingElement = null;
+            if (activeInputTypingResolve === resolve) activeInputTypingResolve = null;
+            resolve();
+        }
+
+        function step() {
             if (sessionId !== inputTypingSessionId) {
                 if (activeInputTypingResolve === resolve) activeInputTypingResolve = null;
                 resolve();
                 return;
             }
-            if (index < targetText.length) {
-                element.value += targetText.charAt(index);
-                index++;
-                if (index < targetText.length) {
-                    activeInputTypingTimer = setTimeout(typeNextChar, speed);
+
+            if (deleteRemaining > 0) {
+                deleteRemaining--;
+                element.value = currentText.slice(0, prefixLen + deleteRemaining);
+                if (deleteRemaining > 0 || typeIndex < targetText.length) {
+                    activeInputTypingTimer = setTimeout(step, deleteRemaining > 0 ? deleteSpeed : speed);
                 } else {
-                    activeInputTypingTimer = null;
-                    activeInputTypingTarget = null;
-                    activeInputTypingElement = null;
-                    if (activeInputTypingResolve === resolve) activeInputTypingResolve = null;
-                    resolve();
+                    finish();
                 }
-            } else {
-                activeInputTypingTimer = null;
-                activeInputTypingTarget = null;
-                activeInputTypingElement = null;
-                if (activeInputTypingResolve === resolve) activeInputTypingResolve = null;
-                resolve();
+                return;
             }
+
+            if (typeIndex < targetText.length) {
+                typeIndex++;
+                element.value = targetText.slice(0, typeIndex);
+                if (typeIndex < targetText.length) {
+                    activeInputTypingTimer = setTimeout(step, speed);
+                } else {
+                    finish();
+                }
+                return;
+            }
+
+            finish();
         }
 
-        typeNextChar();
+        step();
     });
 }
 
@@ -2551,7 +2580,7 @@ async function parseAndLoadUrlParameters() {
     return false;
 }
 
-function bindArtistTrackCards(typingSpeed = 35) {
+function bindArtistTrackCards(typingSpeed = 22) {
     if (typeof document === 'undefined') return;
     const cards = document.querySelectorAll('.artist-track-card');
     cards.forEach((card) => {
@@ -2865,6 +2894,7 @@ if (typeof module !== 'undefined' && module.exports) {
         ensureSelectedArtistCandidates,
         playSnippet,
         fakeTypeValue,
+        getCommonPrefixLength,
         cancelInputTyping,
         bindArtistTrackCards,
         syncShelfVisibility,
