@@ -73,12 +73,13 @@ h1 {
     background-color: #a8a8a8;
 }
 
-/* Config Bar (Monkeytype-style toggles) */
+/* Config Bar (Monkeytype-style toggles, using the site's own palette) */
 .config-bar {
-    --config-bg: #2c2e31;
-    --config-inactive: #646669;
-    --config-hover: #d1d0c5;
-    --config-active: #e2b714;
+    --config-bg: #2a2a2a;       /* same as the text display / lyrics box */
+    --config-border: #333;
+    --config-inactive: #888;    /* same as input placeholders */
+    --config-hover: #fff;
+    --config-active: #4caf50;   /* site green (loading bar) */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -87,7 +88,8 @@ h1 {
     margin: 0 auto 20px;
     padding: 6px 12px;
     background: var(--config-bg);
-    border-radius: 8px;
+    border: 1px solid var(--config-border);
+    border-radius: 5px;
     font-family: monospace;
     font-size: 14px;
 }
@@ -133,7 +135,7 @@ h1 {
     height: 20px;
     margin: 0 6px;
     border-radius: 2px;
-    background: #1e1e1e;
+    background: #444;
 }
 
 .visually-hidden {
@@ -196,11 +198,11 @@ h1 {
 }
 
 .text-display .char.caret {
-    box-shadow: inset 2px 0 0 #e2b714;
+    box-shadow: inset 2px 0 0 #d1d1d1;
 }
 
 .text-display .char.caret-end {
-    box-shadow: inset -2px 0 0 #e2b714;
+    box-shadow: inset -2px 0 0 #d1d1d1;
 }
 
 /* Typing Area */
