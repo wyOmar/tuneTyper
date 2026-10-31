@@ -1715,11 +1715,28 @@ if (includeNumbersCheckbox) {
 if (startBtn) {
     startBtn.addEventListener('click', async () => {
         const inputValue = artistInput ? artistInput.value.trim() : '';
-        const searchType = searchTypeDropdown ? searchTypeDropdown.value : 'artist';
+        let searchType = searchTypeDropdown ? searchTypeDropdown.value : 'artist';
         stopWPMUpdater();
 
         if (searchType !== 'artist' && searchType !== 'song') {
             searchType = 'artist'; // default
+        }
+
+        if (typeof document !== 'undefined') {
+            document.querySelectorAll('.artist-track-pill.active').forEach(btn => btn.classList.remove('active'));
+            const artistHero = document.getElementById('artist-hero');
+            if (artistHero) {
+                const initialName = (typeof window !== 'undefined' && window.__INITIAL_ARTIST__ && window.__INITIAL_ARTIST__.name)
+                    ? window.__INITIAL_ARTIST__.name.toLowerCase()
+                    : '';
+                const matchesInitialArtist = Boolean(
+                    inputValue &&
+                    initialName &&
+                    searchType === 'artist' &&
+                    inputValue.toLowerCase() === initialName
+                );
+                artistHero.style.display = matchesInitialArtist ? '' : 'none';
+            }
         }
 
         if (!inputValue) {
@@ -1947,6 +1964,38 @@ async function parseAndLoadUrlParameters() {
     return false;
 }
 
+function bindArtistTrackPills() {
+    if (typeof document === 'undefined') return;
+    const pills = document.querySelectorAll('.artist-track-pill');
+    pills.forEach((pill) => {
+        pill.addEventListener('click', async () => {
+            const artist = pill.getAttribute('data-artist') || '';
+            const track = pill.getAttribute('data-track') || '';
+            if (!track) return;
+
+            document.querySelectorAll('.artist-track-pill.active').forEach(btn => btn.classList.remove('active'));
+            pill.classList.add('active');
+
+            const query = artist ? `${artist} ${track}` : track;
+            if (artistInput) artistInput.value = artist ? `${artist} - ${track}` : track;
+            if (searchTypeDropdown) searchTypeDropdown.value = 'song';
+
+            stopWPMUpdater();
+            resetGame();
+            startLoadingBar();
+
+            try {
+                await handleSongSearch(query);
+                if (typingArea && !typingArea.disabled) typingArea.focus();
+            } catch (error) {
+                alert(error.message);
+            } finally {
+                stopLoadingBar();
+            }
+        });
+    });
+}
+
 if (typeof window !== 'undefined') {
     window.addEventListener('DOMContentLoaded', async () => {
         if (artistInput) artistInput.focus();
@@ -1964,6 +2013,7 @@ if (typeof window !== 'undefined') {
 
         if (titleElement) titleElement.textContent = '';
         typeNavbarTitle();
+        bindArtistTrackPills();
 
         const loadedFromUrl = await parseAndLoadUrlParameters();
         if (!loadedFromUrl) {
