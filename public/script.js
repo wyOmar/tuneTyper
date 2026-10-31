@@ -886,9 +886,10 @@ function removeParentheses(str) {
 /**
  * Binary Field-Packing Link Compressor (inspired by ha.mr / PortalRunner)
  * Compresses challenge state into a compact, URL-safe Base64 token:
- * - 2 bytes: WPM (0-65535)
+ * - 2 bytes: WPM (0-32767, with bit 15 set as v2 flag marker)
  * - 1 byte:  Accuracy (0-100)
  * - 2 bytes: Start Index (0-65535)
+ * - 1 byte:  Flags (bit 0: punctuation, bit 1: numbers, bit 2: ad-libs)
  * - 1 byte:  Artist byte-length (0-255)
  * - N bytes: UTF-8 Artist
  * - M bytes: UTF-8 Track
@@ -898,9 +899,18 @@ function removeParentheses(str) {
 function encodeChallengeToken(payload) {
     if (!payload || (!payload.artist && !payload.track)) return '';
     try {
-        const wpm = Math.max(0, Math.min(65535, payload.wpm ?? 0));
+        const wpm = Math.max(0, Math.min(32767, payload.wpm ?? 0));
         const acc = Math.max(0, Math.min(255, payload.acc ?? 0));
         const start = Math.max(0, Math.min(65535, payload.start ?? 0));
+
+        const punc = Boolean(payload.punc);
+        const num = Boolean(payload.num);
+        const adlib = payload.adlib !== undefined ? Boolean(payload.adlib) : true;
+
+        let flags = 0;
+        if (punc) flags |= 1;
+        if (num) flags |= 2;
+        if (adlib) flags |= 4;
 
         const encoder = new TextEncoder();
         const artistBytes = encoder.encode(payload.artist || '');
@@ -908,16 +918,18 @@ function encodeChallengeToken(payload) {
 
         if (artistBytes.length > 255) return '';
 
-        const totalLen = 6 + artistBytes.length + trackBytes.length;
+        const totalLen = 7 + artistBytes.length + trackBytes.length;
         const u8 = new Uint8Array(totalLen);
-        u8[0] = (wpm >> 8) & 0xff;
+        // Bit 7 of byte 0 indicates v2 format with conditions flags
+        u8[0] = ((wpm >> 8) & 0x7f) | 0x80;
         u8[1] = wpm & 0xff;
         u8[2] = acc & 0xff;
         u8[3] = (start >> 8) & 0xff;
         u8[4] = start & 0xff;
-        u8[5] = artistBytes.length;
-        u8.set(artistBytes, 6);
-        u8.set(trackBytes, 6 + artistBytes.length);
+        u8[5] = flags & 0xff;
+        u8[6] = artistBytes.length;
+        u8.set(artistBytes, 7);
+        u8.set(trackBytes, 7 + artistBytes.length);
 
         let binary = '';
         for (let i = 0; i < u8.length; i++) {
@@ -940,7 +952,37 @@ function decodeChallengeToken(token) {
             u8[i] = binary.charCodeAt(i);
         }
 
-        // 1. Binary packed format
+        // 1. Binary packed v2 format (with flags byte and bit 7 set on u8[0])
+        const isV2 = (u8[0] & 0x80) !== 0;
+        if (isV2 && u8.length >= 7) {
+            const wpm = ((u8[0] & 0x7f) << 8) | u8[1];
+            const acc = u8[2];
+            const start = (u8[3] << 8) | u8[4];
+            const flags = u8[5];
+            const punc = (flags & 1) !== 0;
+            const num = (flags & 2) !== 0;
+            const adlib = (flags & 4) !== 0;
+            const artistLen = u8[6];
+            if (u8.length >= 7 + artistLen) {
+                const decoder = new TextDecoder();
+                const artist = decoder.decode(u8.subarray(7, 7 + artistLen));
+                const track = decoder.decode(u8.subarray(7 + artistLen));
+                if (artist || track) {
+                    return {
+                        artist: artist || null,
+                        track: track || null,
+                        wpm: wpm > 0 ? wpm : null,
+                        acc: acc > 0 ? acc : null,
+                        start: start >= 0 ? start : null,
+                        punc,
+                        num,
+                        adlib
+                    };
+                }
+            }
+        }
+
+        // 2. Binary packed v1 format (legacy 6-byte header, u8[0] < 0x80)
         if (u8.length >= 6) {
             const wpm = (u8[0] << 8) | u8[1];
             const acc = u8[2];
@@ -956,13 +998,16 @@ function decodeChallengeToken(token) {
                         track: track || null,
                         wpm: wpm > 0 ? wpm : null,
                         acc: acc > 0 ? acc : null,
-                        start: start >= 0 ? start : null
+                        start: start >= 0 ? start : null,
+                        punc: false,
+                        num: false,
+                        adlib: true
                     };
                 }
             }
         }
 
-        // 2. Legacy JSON array fallback
+        // 3. Legacy JSON array fallback
         const decoder = new TextDecoder();
         const jsonStr = decoder.decode(u8);
         const arr = JSON.parse(jsonStr);
@@ -972,7 +1017,10 @@ function decodeChallengeToken(token) {
                 track: arr[1] || null,
                 wpm: (arr[2] !== null && arr[2] !== undefined && !isNaN(arr[2])) ? Number(arr[2]) : null,
                 acc: (arr[3] !== null && arr[3] !== undefined && !isNaN(arr[3])) ? Number(arr[3]) : null,
-                start: (arr[4] !== null && arr[4] !== undefined && !isNaN(arr[4])) ? Number(arr[4]) : null
+                start: (arr[4] !== null && arr[4] !== undefined && !isNaN(arr[4])) ? Number(arr[4]) : null,
+                punc: arr[5] !== undefined ? Boolean(arr[5]) : false,
+                num: arr[6] !== undefined ? Boolean(arr[6]) : false,
+                adlib: arr[7] !== undefined ? Boolean(arr[7]) : true
             };
         }
     } catch (e) {
@@ -981,12 +1029,32 @@ function decodeChallengeToken(token) {
     return null;
 }
 
-function generateChallengeUrl(trackTitle, artistName, wpm, acc, startIndex) {
+function generateChallengeUrl(trackTitle, artistName, wpm, acc, startIndex, options = null) {
     const origin = (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin !== 'null' && !window.location.origin.startsWith('file:'))
         ? window.location.origin
         : 'https://type.vincentchan.uk';
     const pathname = (typeof window !== 'undefined' && window.location && window.location.pathname) ? window.location.pathname : '/';
-    const token = encodeChallengeToken({ artist: artistName, track: trackTitle, wpm, acc, start: startIndex });
+
+    const punc = (options && options.punc !== undefined)
+        ? Boolean(options.punc)
+        : Boolean(removePunctuationCheckbox ? removePunctuationCheckbox.checked : false);
+    const num = (options && options.num !== undefined)
+        ? Boolean(options.num)
+        : Boolean(includeNumbersCheckbox ? includeNumbersCheckbox.checked : false);
+    const adlib = (options && options.adlib !== undefined)
+        ? Boolean(options.adlib)
+        : Boolean(removeAdlibsCheckbox ? removeAdlibsCheckbox.checked : true);
+
+    const token = encodeChallengeToken({
+        artist: artistName,
+        track: trackTitle,
+        wpm,
+        acc,
+        start: startIndex,
+        punc,
+        num,
+        adlib
+    });
     if (token) {
         return `${origin}${pathname}?c=${token}`;
     }
@@ -996,6 +1064,9 @@ function generateChallengeUrl(trackTitle, artistName, wpm, acc, startIndex) {
     if (wpm !== undefined && wpm !== null && !isNaN(wpm)) params.set('wpm', wpm);
     if (acc !== undefined && acc !== null && !isNaN(acc)) params.set('acc', acc);
     if (startIndex !== undefined && startIndex !== null && !isNaN(startIndex) && startIndex >= 0) params.set('start', startIndex);
+    if (punc) params.set('punc', '1');
+    if (num) params.set('num', '1');
+    if (!adlib) params.set('adlib', '0');
     return `${origin}${pathname}?${params.toString()}`;
 }
 
@@ -1011,7 +1082,7 @@ function generateShareText() {
 
     if (isSharedGame || searchType === 'song') {
         guessLine = '⚡ Direct Song Practice';
-        emojiGrid = '🟩🟩🟩🟩🟩';
+        emojiGrid = ''; // Direct search or shared game skips song guessing, no boxes to display
     } else if (gaveUp) {
         guessLine = '🎯 Song revealed';
         emojiGrid = '🟥🟥🟥🟥🟥';
@@ -1030,17 +1101,26 @@ function generateShareText() {
         emojiGrid = blocks.join('');
     }
 
-    const shareUrl = generateChallengeUrl(trackTitle, artistName, wpm, acc, currentStartIndex);
+    const currentPunc = removePunctuationCheckbox ? removePunctuationCheckbox.checked : false;
+    const currentNum = includeNumbersCheckbox ? includeNumbersCheckbox.checked : false;
+    const currentAdlib = removeAdlibsCheckbox ? removeAdlibsCheckbox.checked : true;
+    const shareUrl = generateChallengeUrl(trackTitle, artistName, wpm, acc, currentStartIndex, {
+        punc: currentPunc,
+        num: currentNum,
+        adlib: currentAdlib
+    });
     const invite = (gaveUp || isSharedGame || searchType === 'song') ? `Beat my score: ${shareUrl}` : `Can you beat me? ${shareUrl}`;
 
-    return [
+    const lines = [
         '🎵 TuneTyper',
         `🎤 "${trackTitle}" — ${artistName}`,
         `⚡ ${wpm} WPM | ${acc}% Acc`,
         guessLine,
         emojiGrid,
         invite
-    ].join('\n');
+    ].filter(line => line && line.trim().length > 0);
+
+    return lines.join('\n');
 }
 
 async function copyShareScore() {
@@ -1075,17 +1155,9 @@ async function copyShareScore() {
     }
 
     const shareBtn = document.getElementById('share-score-btn');
-    const toast = document.getElementById('share-toast');
-    if (toast) {
-        toast.style.display = 'block';
-        toast.textContent = copied ? 'Copied to clipboard!' : 'Failed to copy';
-        setTimeout(() => {
-            toast.style.display = 'none';
-        }, 2500);
-    }
-    if (shareBtn && copied) {
+    if (shareBtn) {
         const originalText = shareBtn.textContent;
-        shareBtn.textContent = '✓ Copied!';
+        shareBtn.textContent = copied ? '✓ Copied!' : 'Failed to copy';
         setTimeout(() => {
             shareBtn.textContent = originalText;
         }, 2000);
@@ -1097,7 +1169,10 @@ async function copyChallengeLink() {
     const artistName = (selectedTrack && selectedTrack.artist) ? selectedTrack.artist.name : '';
     const wpm = finalWPM ?? calculateWPM();
     const acc = finalAccuracy ?? calculateAccuracy();
-    const url = generateChallengeUrl(trackTitle, artistName, wpm, acc, currentStartIndex);
+    const punc = removePunctuationCheckbox ? removePunctuationCheckbox.checked : false;
+    const num = includeNumbersCheckbox ? includeNumbersCheckbox.checked : false;
+    const adlib = removeAdlibsCheckbox ? removeAdlibsCheckbox.checked : true;
+    const url = generateChallengeUrl(trackTitle, artistName, wpm, acc, currentStartIndex, { punc, num, adlib });
 
     let copied = false;
 
@@ -1128,19 +1203,10 @@ async function copyChallengeLink() {
         }
     }
 
-    const toast = document.getElementById('share-toast');
-    if (toast) {
-        toast.style.display = 'block';
-        toast.textContent = copied ? 'Challenge link copied!' : 'Failed to copy';
-        setTimeout(() => {
-            toast.style.display = 'none';
-        }, 2500);
-    }
-
     const challengeBtn = document.getElementById('share-challenge-btn');
-    if (challengeBtn && copied) {
+    if (challengeBtn) {
         const originalText = challengeBtn.textContent;
-        challengeBtn.textContent = '✓ Copied!';
+        challengeBtn.textContent = copied ? '✓ Copied!' : 'Failed to copy';
         setTimeout(() => {
             challengeBtn.textContent = originalText;
         }, 2000);
@@ -1199,7 +1265,6 @@ function showFinalInfo() {
                 <div class="share-container">
                     <button id="share-score-btn" class="share-btn">📋 Share Score</button>
                     <button id="share-challenge-btn" class="share-btn challenge-link-btn">🔗 Copy Challenge Link</button>
-                    <span id="share-toast" class="share-toast" style="display: none;">Copied to clipboard!</span>
                 </div>
             </div>
         </div>
@@ -1573,14 +1638,36 @@ function parseChallengeParams(queryString) {
     const acc = (accRaw && !isNaN(parseInt(accRaw, 10))) ? parseInt(accRaw, 10) : null;
     const start = (startRaw && !isNaN(parseInt(startRaw, 10))) ? parseInt(startRaw, 10) : null;
 
+    const punc = params.has('punc') ? (params.get('punc') === '1' || params.get('punc') === 'true') : false;
+    const num = params.has('num') ? (params.get('num') === '1' || params.get('num') === 'true') : false;
+    const adlib = params.has('adlib') ? (params.get('adlib') === '1' || params.get('adlib') === 'true') : true;
+
     if (!artist && !track) return null;
-    return { artist, track, wpm, acc, start };
+    return { artist, track, wpm, acc, start, punc, num, adlib };
 }
 
-async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = null) {
+async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = null, options = null) {
     resetGame(true);
     isSharedGame = true;
     if (searchTypeDropdown) searchTypeDropdown.value = 'song';
+
+    // Synchronize typing conditions so challengers play under identical conditions
+    if (options) {
+        if (options.punc !== undefined && removePunctuationCheckbox) {
+            removePunctuationCheckbox.checked = Boolean(options.punc);
+        }
+        if (options.num !== undefined && includeNumbersCheckbox) {
+            includeNumbersCheckbox.checked = Boolean(options.num);
+        }
+        if (options.adlib !== undefined && removeAdlibsCheckbox) {
+            removeAdlibsCheckbox.checked = Boolean(options.adlib);
+        }
+    }
+
+    // Disable condition toggles during challenge play to prevent changing conditions
+    if (removePunctuationCheckbox) removePunctuationCheckbox.disabled = true;
+    if (includeNumbersCheckbox) includeNumbersCheckbox.disabled = true;
+    if (removeAdlibsCheckbox) removeAdlibsCheckbox.disabled = true;
 
     const searchQuery = artistName ? `${artistName} ${trackTitle}` : trackTitle;
     if (artistInput) artistInput.value = searchQuery;
@@ -1632,6 +1719,9 @@ async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = nu
                     challengerWPM = null;
                     challengerAcc = null;
                     if (challengeBanner) challengeBanner.style.display = 'none';
+                    if (removePunctuationCheckbox) removePunctuationCheckbox.disabled = false;
+                    if (includeNumbersCheckbox) includeNumbersCheckbox.disabled = false;
+                    if (removeAdlibsCheckbox) removeAdlibsCheckbox.disabled = false;
                     loadDefaultPlaylist();
                 });
             }
@@ -1642,8 +1732,9 @@ async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = nu
 }
 
 async function parseAndLoadUrlParameters() {
-    if (typeof window === 'undefined' || !window.location || !window.location.search) return false;
-    const parsed = parseChallengeParams(window.location.search);
+    if (typeof window === 'undefined' || !window.location || (!window.location.search && !window.location.hash)) return false;
+    const query = window.location.search || window.location.hash || '';
+    const parsed = parseChallengeParams(query);
     if (!parsed) return false;
 
     challengerWPM = parsed.wpm;
@@ -1652,7 +1743,11 @@ async function parseAndLoadUrlParameters() {
 
     if (parsed.track) {
         isSharedGame = true;
-        await loadSharedChallenge(parsed.artist, parsed.track, parsed.start);
+        await loadSharedChallenge(parsed.artist, parsed.track, parsed.start, {
+            punc: parsed.punc,
+            num: parsed.num,
+            adlib: parsed.adlib
+        });
         return true;
     } else if (parsed.artist) {
         if (artistInput) artistInput.value = parsed.artist;
@@ -1868,6 +1963,7 @@ if (typeof module !== 'undefined' && module.exports) {
         decodeChallengeToken,
         generateShareText,
         extractRandomSection,
+        loadSharedChallenge,
         _getState: () => ({
             totalKeystrokes,
             errorKeystrokes,
@@ -1886,7 +1982,10 @@ if (typeof module !== 'undefined' && module.exports) {
             selectedTrack,
             gaveUp,
             attemptHistory,
-            guessCount
+            guessCount,
+            removePunctuationCheckbox,
+            includeNumbersCheckbox,
+            removeAdlibsCheckbox
         }),
         _setState: (state) => {
             if ('totalKeystrokes' in state) totalKeystrokes = state.totalKeystrokes;
