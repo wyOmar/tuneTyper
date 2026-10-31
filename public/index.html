@@ -90,7 +90,13 @@
             <div class="hints-panel">
                 <div class="hints-top-bar">
                     <span id="hint-stage-badge" class="hint-badge">Hint 1 / 5</span>
-                    <button id="next-hint-btn" class="next-hint-btn" type="button">💡 Next Hint</button>
+                    <div id="attempt-tracker" class="attempt-tracker" aria-label="Attempts tracker">
+                        <span class="attempt-dot current"></span>
+                        <span class="attempt-dot"></span>
+                        <span class="attempt-dot"></span>
+                        <span class="attempt-dot"></span>
+                        <span class="attempt-dot"></span>
+                    </div>
                 </div>
 
                 <div class="hints-body">
@@ -118,11 +124,10 @@
                 <div class="guess-input-container">
                     <input type="text" id="guess-input" placeholder="Type song name or pick suggestion..." autocomplete="off">
                     <button id="guess-submit-btn" class="guess-submit-btn" type="button">Guess</button>
-                    <button id="give-up" type="button">Reveal</button>
+                    <button id="skip-btn" class="skip-btn" type="button">Skip</button>
                 </div>
                 <ul id="guess-suggestions" class="guess-suggestions" style="display: none;"></ul>
             </div>
-            <p id="guess-feedback"></p>
         </div>
 
         <div id="song-info" class="song-info"></div>
