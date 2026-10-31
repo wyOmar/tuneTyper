@@ -486,12 +486,19 @@ typingArea.addEventListener('input', () => {
         startWPMUpdater();
     }
 
-    const typedText = typingArea.value.trim();
-    const currentWord = processedWords[currentWordIndex];
-    const normalizedTypedText = normalizeTextForTyping(typedText);
-    const normalizedCurrentWord = normalizeTextForTyping(currentWord);
+    // Ignore leading whitespace (e.g. a stray space at the start of a word)
+    const rawTyped = typingArea.value.replace(/^\s+/, '');
+    if (rawTyped !== typingArea.value) typingArea.value = rawTyped;
 
-    if (normalizedTypedText === normalizedCurrentWord) {
+    const currentWord = processedWords[currentWordIndex];
+    const normalizedTypedText = normalizeTextForTyping(rawTyped); // trimmed
+    const normalizedCurrentWord = normalizeTextForTyping(currentWord);
+    const endsWithSpace = /\s$/.test(rawTyped);
+    const isLastWord = currentWordIndex === processedWords.length - 1;
+
+    // Like TypeRacer: the word must be correct AND followed by a space to move on.
+    // The final word finishes the test as soon as it's typed correctly.
+    if (normalizedTypedText === normalizedCurrentWord && (endsWithSpace || isLastWord)) {
         typingArea.value = '';
         typingArea.classList.remove('incorrect');
         // Clear per-character state on the finished word; it's coloured green as a whole
@@ -506,9 +513,13 @@ typingArea.addEventListener('input', () => {
         return;
     }
 
-    renderWordProgress(currentWordIndex, normalizedTypedText);
+    // Keep trailing spaces so a premature/wrong space shows up as an error
+    const typedForDisplay = endsWithSpace
+        ? normalizedTypedText + ' '.repeat(rawTyped.match(/\s+$/)[0].length)
+        : normalizedTypedText;
+    renderWordProgress(currentWordIndex, typedForDisplay);
 
-    if (!normalizedCurrentWord.startsWith(normalizedTypedText)) {
+    if (!normalizedCurrentWord.startsWith(typedForDisplay)) {
         typingArea.classList.add('incorrect');
     } else {
         typingArea.classList.remove('incorrect');
@@ -516,6 +527,11 @@ typingArea.addEventListener('input', () => {
 
     // wpmResult.textContent = `${calculateWPM()}`;
     // //CurrentWPM
+});
+
+// Only space moves to the next word, so don't let Enter insert a newline in the typing box
+typingArea.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') event.preventDefault();
 });
 
 guessInput.addEventListener('keydown', (event) => {

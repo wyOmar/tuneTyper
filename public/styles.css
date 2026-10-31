@@ -44,12 +44,14 @@ h1 {
 }
 
 #artist-input {
-    width: 40%;
+    flex: 1; /* fill the row now that the toggles live in their own bar */
+    min-width: 0;
     height: 22.67px;
 }
 
 #search-type {
-    width: 20%;
+    flex: 0 0 auto;
+    min-width: 110px;
 }
 
 #artist-input::placeholder {
@@ -204,12 +206,15 @@ h1 {
 /* Typing Area */
 .typing-area-container {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    align-items: stretch; /* End Game button matches the textarea height */
+    gap: 10px;
+    margin-top: 5px;
+    margin-bottom: 15px;
 }
 
 #typing-area {
-    width: 80%;
+    flex: 1;
+    min-width: 0;
     font-size: 18px;
     padding: 10px;
     height: 40px;
@@ -218,8 +223,7 @@ h1 {
     background-color: #333;
     color: #fff;
     resize: none;
-    margin-bottom:15px;
-    margin-top:5px;
+    margin: 0;
 }
 
 #typing-area.incorrect {
@@ -229,10 +233,9 @@ h1 {
 }
 
 #end-game-btn {
-    margin-left: 10px;
+    flex: 0 0 auto;
     padding: 10px 20px;
     font-size: 18px;
-    height: 40px;
     color: #fff;
     background-color: #dc3545;
     border: none;
