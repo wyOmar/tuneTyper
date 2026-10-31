@@ -317,6 +317,8 @@ test('Responsive post-game results layout & mobile UI controls', async (t) => {
         assert.match(songInfo.innerHTML, /class="final-media-col"/);
         assert.match(songInfo.innerHTML, /class="final-content-col"/);
         assert.match(songInfo.innerHTML, /id="play-again-btn"/);
+        assert.match(songInfo.innerHTML, />Copy Link<\/button>/, 'should use compact "Copy Link" label without emoji');
+        assert.doesNotMatch(songInfo.innerHTML, /Copy Challenge Link/i);
         assert.doesNotMatch(songInfo.innerHTML, /width:\s*250px/i, 'should not use hardcoded 250px inline width');
         assert.doesNotMatch(songInfo.innerHTML, /<p[^>]*id="display-lyrics"/i, 'should use a <div> container instead of nesting <div> inside <p>');
 

@@ -1586,7 +1586,7 @@ function showFinalInfo() {
                 </div>
                 <div class="share-container">
                     <button id="share-score-btn" class="share-btn" type="button">📋 Share Score</button>
-                    <button id="share-challenge-btn" class="share-btn challenge-link-btn" type="button">🔗 Copy Challenge Link</button>
+                    <button id="share-challenge-btn" class="share-btn challenge-link-btn" type="button">Copy Link</button>
                     <button id="play-again-btn" class="share-btn play-again-btn" type="button">↻ Next Song</button>
                 </div>
             </div>
