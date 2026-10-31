@@ -529,9 +529,53 @@ typingArea.addEventListener('input', () => {
     // //CurrentWPM
 });
 
-// Only space moves to the next word, so don't let Enter insert a newline in the typing box
+// Backspace safety net: if the current word is typed correctly but has extra characters after it
+// (e.g. "cantl" for "cant"), Ctrl/Alt+Backspace only removes the extras, and a burst of backspaces
+// (held key or rapid presses) stops at the correct word instead of eating into it.
+// Words with a mistake inside them (e.g. "canlt") get no protection, so muscle memory isn't affected.
+const BACKSPACE_BURST_MS = 500;
+let backspaceLockUntil = 0;
+
 typingArea.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') event.preventDefault();
+    // Only space moves to the next word, so don't let Enter insert a newline in the typing box
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        return;
+    }
+    if (['Control', 'Alt', 'Meta', 'Shift'].includes(event.key)) return;
+    if (event.key !== 'Backspace') {
+        backspaceLockUntil = 0; // any other key ends the backspace burst
+        return;
+    }
+
+    const value = typingArea.value;
+    const word = processedWords[currentWordIndex];
+    const caretAtEnd = typingArea.selectionStart === value.length && typingArea.selectionEnd === value.length;
+    if (word === undefined || !caretAtEnd) return; // let normal editing happen for selections etc.
+
+    const now = performance.now();
+    const typed = normalizeTextForTyping(value);
+    const hasExtrasAfterCorrectWord = typed.length > word.length && typed.startsWith(word);
+
+    // Already stopped at the correct word during this burst: hold the line
+    if (typed === word && (event.repeat || now < backspaceLockUntil)) {
+        event.preventDefault();
+        backspaceLockUntil = now + BACKSPACE_BURST_MS;
+        return;
+    }
+
+    if (!hasExtrasAfterCorrectWord) return;
+
+    if (event.ctrlKey || event.altKey || event.metaKey) {
+        // Word-delete: strip only the extra characters, keep the correct word
+        event.preventDefault();
+        typingArea.value = word;
+        typingArea.dispatchEvent(new Event('input'));
+        backspaceLockUntil = now + BACKSPACE_BURST_MS;
+    } else if (normalizeTextForTyping(value.slice(0, -1)) === word) {
+        // This plain backspace removes the last extra character; lock further backspaces in the burst
+        backspaceLockUntil = now + BACKSPACE_BURST_MS;
+    }
 });
 
 guessInput.addEventListener('keydown', (event) => {
