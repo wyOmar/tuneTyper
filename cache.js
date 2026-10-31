@@ -3,9 +3,20 @@ const nativeFetch = typeof globalThis.fetch === 'function'
     : null;
 
 const CACHE_PREFIX = 'tt:v1';
-const UK_TOP_40_PLAYABLE_KEY = `${CACHE_PREFIX}:uk-top-40:playable`;
-const UK_TOP_40_RAW_FALLBACK_KEY = `${CACHE_PREFIX}:uk-top-40:raw`;
-const WARM_LOCK_KEY = `${CACHE_PREFIX}:uk-top-40:warm-lock`;
+
+function playlistPlayableKey(playlistId) {
+    return `${CACHE_PREFIX}:playlist:${String(playlistId).trim()}:playable`;
+}
+
+function playlistRawFallbackKey(playlistId) {
+    return `${CACHE_PREFIX}:playlist:${String(playlistId).trim()}:raw`;
+}
+
+const UK_TOP_40_PLAYABLE_KEY = playlistPlayableKey('2868476282');
+const UK_TOP_40_RAW_FALLBACK_KEY = playlistRawFallbackKey('2868476282');
+const DEFAULT_PLAYABLE_KEY = playlistPlayableKey('13650203641');
+const DEFAULT_RAW_FALLBACK_KEY = playlistRawFallbackKey('13650203641');
+const WARM_LOCK_KEY = `${CACHE_PREFIX}:warm-lock`;
 
 const TTL = {
     SUGGEST_SECONDS: 7 * 24 * 60 * 60,        // 7 days in Redis
@@ -367,8 +378,12 @@ const defaultCache = createCacheClient();
 
 module.exports = {
     CACHE_PREFIX,
+    playlistPlayableKey,
+    playlistRawFallbackKey,
     UK_TOP_40_PLAYABLE_KEY,
     UK_TOP_40_RAW_FALLBACK_KEY,
+    DEFAULT_PLAYABLE_KEY,
+    DEFAULT_RAW_FALLBACK_KEY,
     WARM_LOCK_KEY,
     TTL,
     normalizeCachePart,

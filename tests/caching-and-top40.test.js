@@ -327,7 +327,7 @@ test('Express Edge headers, read-through lyrics/Deezer caching & 24/7 UK Top 40 
         let ovhCalls = 0;
 
         axios.get = async (url) => {
-            if (url.includes('api.deezer.com/playlist/2868476282')) {
+            if (url.includes('api.deezer.com/playlist/')) {
                 deezerPlaylistCalls++;
                 return {
                     data: {
