@@ -83,10 +83,44 @@
         </div>
 
         <div id="guess-section" class="guess-section" style="display: none;">
+            <h3 class="guess-heading">🎵 Guess the Song</h3>
             
-            <div class="guess-input-container">
-                <input type="text" id="guess-input" placeholder="Guess the song...">
-                <button id="give-up" style="display: none;">Reveal</button>
+            <div id="mystery-title" class="mystery-title" aria-label="Song title pattern"></div>
+
+            <div class="hints-panel">
+                <div class="hints-top-bar">
+                    <span id="hint-stage-badge" class="hint-badge">Hint 1 / 5</span>
+                    <button id="next-hint-btn" class="next-hint-btn" type="button">💡 Next Hint</button>
+                </div>
+
+                <div class="hints-body">
+                    <div class="hint-cover-box">
+                        <img id="hint-cover-img" class="hint-cover-img" src="" alt="Album Art">
+                        <span class="hint-cover-label">Album Art</span>
+                    </div>
+
+                    <div class="hint-details-box">
+                        <div id="hint-badges" class="hint-badges"></div>
+                        <div class="hint-player">
+                            <button id="snippet-play-btn" class="snippet-btn" type="button">
+                                <span id="snippet-icon" class="snippet-icon">▶</span>
+                                <span id="snippet-label">Play snippet (2s)</span>
+                            </button>
+                            <div class="snippet-track">
+                                <div id="snippet-bar" class="snippet-bar"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="guess-input-wrapper">
+                <div class="guess-input-container">
+                    <input type="text" id="guess-input" placeholder="Type song name or pick suggestion..." autocomplete="off">
+                    <button id="guess-submit-btn" class="guess-submit-btn" type="button">Guess</button>
+                    <button id="give-up" type="button">Reveal</button>
+                </div>
+                <ul id="guess-suggestions" class="guess-suggestions" style="display: none;"></ul>
             </div>
             <p id="guess-feedback"></p>
         </div>

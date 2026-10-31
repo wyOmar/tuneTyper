@@ -52,6 +52,25 @@ app.get('/default', async (req, res) => {
     }
 });
 
+// Deezer API: Get track details (release_date, etc.)
+app.get('/track-details', async (req, res) => {
+    const { trackId } = req.query;
+    if (!trackId) return res.status(400).send('Track ID is required.');
+
+    try {
+        const response = await axios.get(`https://api.deezer.com/track/${encodeURIComponent(trackId)}`);
+        res.json({
+            id: response.data.id,
+            release_date: response.data.release_date,
+            bpm: response.data.bpm,
+            duration: response.data.duration
+        });
+    } catch (error) {
+        console.error('Error fetching track details:', error.message);
+        res.status(500).send('Failed to fetch track details.');
+    }
+});
+
 
 // OVH Lyrics API Route
 app.get('/lyrics', async (req, res) => {
