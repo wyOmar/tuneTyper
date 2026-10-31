@@ -4,7 +4,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const cssPath = path.join(__dirname, '..', 'public', 'styles.css');
+const htmlPath = path.join(__dirname, '..', 'public', 'index.html');
 const css = fs.readFileSync(cssPath, 'utf-8');
+const html = fs.readFileSync(htmlPath, 'utf-8');
 
 test('Footer layout and positioning validation', async (t) => {
     await t.test('Footer does not use fixed positioning to prevent overlapping content on zoom', () => {
@@ -35,5 +37,20 @@ test('Footer layout and positioning validation', async (t) => {
         const footerStyles = footerBlockMatch[1];
 
         assert.match(footerStyles, /margin-top\s*:\s*auto/i, '.footer should have margin-top: auto');
+    });
+
+    await t.test('Footer renders minimal Monkeytype-style GitHub icon + label link', () => {
+        assert.doesNotMatch(html, /View this project on/i, 'Legacy plain-text GitHub sentence should be removed');
+        assert.match(
+            html,
+            /<div class="footer-links">[\s\S]*?<a[^>]*href="https:\/\/github\.com\/wyOmar\/tuneTyper"[^>]*class="footer-link"[^>]*>[\s\S]*?<svg class="footer-icon"[\s\S]*?<span>github<\/span>[\s\S]*?<\/a>[\s\S]*?<\/div>/,
+            'Footer should render .footer-links with .footer-link, inline .footer-icon SVG, and monospace github label'
+        );
+        assert.match(html, /rel="noopener noreferrer"/, 'External GitHub link should include rel="noopener noreferrer"');
+
+        const footerLinkMatch = css.match(/\.footer-link\s*\{([^}]+)\}/);
+        assert.ok(footerLinkMatch, '.footer-link rule should exist in styles.css');
+        assert.match(footerLinkMatch[1], /font-family\s*:\s*monospace/i, '.footer-link should use monospace font');
+        assert.match(footerLinkMatch[1], /text-decoration\s*:\s*none/i, '.footer-link should not be underlined');
     });
 });
