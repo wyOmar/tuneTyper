@@ -27,6 +27,13 @@ let previousArtist = "";
 let artistTracks = [];
 let cachedSongLyrics = {};
 let wpmInterval;
+// Share Score & Accuracy variables
+let totalKeystrokes = 0;
+let errorKeystrokes = 0;
+let previousRawTyped = '';
+let finalWPM = 0;
+let finalAccuracy = 100;
+let gaveUp = false;
 // Lyrics variables
 let sectionOne = "";
 let sectionTwo = "";
@@ -230,7 +237,12 @@ function resetGame() {
     sectionOne = "";
     sectionTwo = "";
     sectionSelected = "";
-
+    totalKeystrokes = 0;
+    errorKeystrokes = 0;
+    previousRawTyped = '';
+    finalWPM = 0;
+    finalAccuracy = 100;
+    gaveUp = false;
 
     typingArea.value = '';
     typingArea.style.display = 'block';
@@ -321,6 +333,11 @@ function calculateWPM() {
     return Math.round((currentWordIndex / elapsedTime) * 60);
 }
 
+function calculateAccuracy() {
+    if (totalKeystrokes === 0) return 100;
+    return Math.max(0, Math.min(100, Math.round(((totalKeystrokes - errorKeystrokes) / totalKeystrokes) * 100)));
+}
+
 function startWPMUpdater() {
     wpmInterval = setInterval(() => {
         wpmResult.textContent = `${calculateWPM()} WPM`;
@@ -389,7 +406,110 @@ function removeParentheses(str) {
 
 }
 
+function generateShareText() {
+    const trackTitle = selectedTrack ? selectedTrack.title : 'Unknown';
+    const artistName = selectedTrack && selectedTrack.artist ? selectedTrack.artist.name : 'Unknown';
+    const acc = finalAccuracy ?? calculateAccuracy();
+    const wpm = finalWPM ?? calculateWPM();
+    const searchType = searchTypeDropdown ? searchTypeDropdown.value : 'artist';
+
+    let guessLine = '';
+    let emojiGrid = '';
+
+    if (searchType === 'song') {
+        guessLine = '⚡ Direct Song Practice';
+        emojiGrid = '🟩🟩🟩🟩🟩';
+    } else if (gaveUp) {
+        guessLine = '🎯 Song revealed';
+        emojiGrid = '🟥🟥🟥🟥🟥';
+    } else if (guessCount === 1) {
+        guessLine = '🎯 Guessed in 1 try!';
+        emojiGrid = '🟩🟩🟩🟩🟩';
+    } else if (guessCount === 2) {
+        guessLine = '🎯 Guessed in 2 tries!';
+        emojiGrid = '🟥🟩🟩🟩🟩';
+    } else if (guessCount === 3) {
+        guessLine = '🎯 Guessed in 3 tries!';
+        emojiGrid = '🟥🟥🟩🟩🟩';
+    } else if (guessCount === 4) {
+        guessLine = '🎯 Guessed in 4 tries!';
+        emojiGrid = '🟥🟥🟥🟩🟩';
+    } else if (guessCount === 5) {
+        guessLine = '🎯 Guessed in 5 tries!';
+        emojiGrid = '🟥🟥🟥🟥🟩';
+    } else {
+        guessLine = `🎯 Guessed in ${guessCount} tries!`;
+        const redCount = Math.min(guessCount - 1, 5);
+        emojiGrid = '🟥'.repeat(redCount) + '🟩';
+    }
+
+    const shareUrl = 'https://type.vincentchan.uk';
+    const invite = (gaveUp || searchType === 'song') ? shareUrl : `Can you beat me? ${shareUrl}`;
+
+    return [
+        '🎵 TuneTyper',
+        `🎤 "${trackTitle}" — ${artistName}`,
+        `⚡ ${wpm} WPM | ${acc}% Acc`,
+        guessLine,
+        emojiGrid,
+        invite
+    ].join('\n');
+}
+
+async function copyShareScore() {
+    const text = generateShareText();
+    let copied = false;
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+            await navigator.clipboard.writeText(text);
+            copied = true;
+        } catch (err) {
+            console.warn('navigator.clipboard.writeText failed, falling back:', err);
+        }
+    }
+
+    if (!copied) {
+        try {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            textarea.style.top = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            copied = document.execCommand('copy');
+            document.body.removeChild(textarea);
+        } catch (err) {
+            console.error('Fallback copy failed:', err);
+        }
+    }
+
+    const shareBtn = document.getElementById('share-score-btn');
+    const toast = document.getElementById('share-toast');
+    if (toast) {
+        toast.style.display = 'block';
+        toast.textContent = copied ? 'Copied to clipboard!' : 'Failed to copy';
+        setTimeout(() => {
+            toast.style.display = 'none';
+        }, 2500);
+    }
+    if (shareBtn && copied) {
+        const originalText = shareBtn.textContent;
+        shareBtn.textContent = '✓ Copied!';
+        setTimeout(() => {
+            shareBtn.textContent = originalText;
+        }, 2000);
+    }
+}
+
 function showFinalInfo() {
+    if (!finalWPM) {
+        finalWPM = calculateWPM();
+        finalAccuracy = calculateAccuracy();
+    }
 
     let infoHTML = `
          <div style="display: flex; align-items: flex-start;">
@@ -401,6 +521,10 @@ function showFinalInfo() {
                     <source src="${selectedTrack.preview}" type="audio/mpeg">
                     Your browser does not support the audio element.
                 </audio>
+                <div class="share-container">
+                    <button id="share-score-btn" class="share-btn">📋 Share Score</button>
+                    <span id="share-toast" class="share-toast" style="display: none;">Copied to clipboard!</span>
+                </div>
             </div>
 
             <!-- Lyrics Section -->
@@ -417,6 +541,11 @@ function showFinalInfo() {
     songInfo.innerHTML = infoHTML;
     guessSection.style.display = 'none';
     searchTypeDropdown.disabled = false;
+
+    const shareBtn = document.getElementById('share-score-btn');
+    if (shareBtn) {
+        shareBtn.addEventListener('click', copyShareScore);
+    }
 
     const audioElement = document.getElementById('song-preview');
     if (audioElement) {
@@ -443,6 +572,7 @@ function scrollToSelectedLyrics() {
 }
 
 function giveUp() {
+    gaveUp = true;
     showFinalInfo();
 }
 giveUpButton.addEventListener('click', giveUp);
@@ -451,7 +581,9 @@ function endGame() {
     stopWPMUpdater();
     typingArea.disabled = true;
     typingArea.style.display = 'none';
-    wpmResult.textContent = `${calculateWPM()} WPM`;
+    finalWPM = calculateWPM();
+    finalAccuracy = calculateAccuracy();
+    wpmResult.textContent = `${finalWPM} WPM | ${finalAccuracy}% ACC`;
     //Final WPM
     guessSection.style.display = 'none';
     endGameBtn.style.display = 'none';
@@ -496,9 +628,27 @@ typingArea.addEventListener('input', () => {
     const endsWithSpace = /\s$/.test(rawTyped);
     const isLastWord = currentWordIndex === processedWords.length - 1;
 
+    // Track typed characters and errors
+    if (rawTyped.length > previousRawTyped.length) {
+        const addedCount = rawTyped.length - previousRawTyped.length;
+        totalKeystrokes += addedCount;
+        for (let i = previousRawTyped.length; i < rawTyped.length; i++) {
+            const typedChar = rawTyped[i];
+            const expectedChar = normalizedCurrentWord[i];
+            if (!expectedChar || typedChar !== expectedChar) {
+                errorKeystrokes++;
+            }
+        }
+    }
+    previousRawTyped = rawTyped;
+
     // Like TypeRacer: the word must be correct AND followed by a space to move on.
     // The final word finishes the test as soon as it's typed correctly.
     if (normalizedTypedText === normalizedCurrentWord && (endsWithSpace || isLastWord)) {
+        if (endsWithSpace) {
+            totalKeystrokes += 1;
+        }
+        previousRawTyped = '';
         typingArea.value = '';
         typingArea.classList.remove('incorrect');
         // Clear per-character state on the finished word; it's coloured green as a whole
