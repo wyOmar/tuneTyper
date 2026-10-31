@@ -2,7 +2,7 @@
 <!--
   Source for public/og-image.png (1200x630 social preview card).
   Regenerate with:
-    firefox --headless --window-size=1200,630 --screenshot public/og-image.png "file://$PWD/assets/og-image.html"
+    rm -f public/og-image.png && firefox --headless --screenshot "$PWD/public/og-image.png" --window-size 1200,630 "file://$PWD/assets/og-image.html"
 -->
 <html lang="en">
 <head>
@@ -92,6 +92,21 @@
         color: #4caf50;
     }
     .wpm span { font-size: 26px; color: #888; font-weight: normal; margin-left: 10px; }
+    .footer-cta {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+    }
+    .cta-btn {
+        font-size: 26px;
+        font-weight: bold;
+        color: #121212;
+        background: #4caf50;
+        padding: 12px 26px;
+        border-radius: 10px;
+        letter-spacing: 0.5px;
+        box-shadow: 0 4px 14px rgba(76, 175, 80, 0.35);
+    }
     .url {
         font-size: 28px;
         color: #d1d1d1;
@@ -118,7 +133,10 @@
 
         <div class="footer">
             <div class="wpm">87 WPM<span>98% acc</span></div>
-            <div class="url">type.vincentchan.uk</div>
+            <div class="footer-cta">
+                <span class="cta-btn">Play Free &rarr;</span>
+                <span class="url">type.vincentchan.uk</span>
+            </div>
         </div>
     </div>
 </body>
