@@ -1,38 +1,39 @@
 // Frontend
-const artistInput = document.getElementById('artist-input');
-const startBtn = document.getElementById('start-btn');
-const typingArea = document.getElementById('typing-area');
-const displayText = document.getElementById('display-text');
-const wpmResult = document.getElementById('wpm-result');
-const removePunctuationCheckbox = document.getElementById('remove-punctuation');
-const removeAdlibsCheckbox = document.getElementById('remove-adlibs');
-const includeNumbersCheckbox = document.getElementById('include-numbers');
-const songInfo = document.getElementById('song-info');
-const guessSection = document.getElementById('guess-section');
-const guessInput = document.getElementById('guess-input');
-const guessInputContainer = document.querySelector('.guess-input-container');
-const skipBtn = document.getElementById('skip-btn');
-const searchTypeDropdown = document.getElementById('search-type');
-const endGameBtn = document.getElementById('end-game-btn');
+const artistInput = typeof document !== 'undefined' ? document.getElementById('artist-input') : null;
+const startBtn = typeof document !== 'undefined' ? document.getElementById('start-btn') : null;
+const typingArea = typeof document !== 'undefined' ? document.getElementById('typing-area') : null;
+const displayText = typeof document !== 'undefined' ? document.getElementById('display-text') : null;
+const wpmResult = typeof document !== 'undefined' ? document.getElementById('wpm-result') : null;
+const removePunctuationCheckbox = typeof document !== 'undefined' ? document.getElementById('remove-punctuation') : null;
+const removeAdlibsCheckbox = typeof document !== 'undefined' ? document.getElementById('remove-adlibs') : null;
+const includeNumbersCheckbox = typeof document !== 'undefined' ? document.getElementById('include-numbers') : null;
+const songInfo = typeof document !== 'undefined' ? document.getElementById('song-info') : null;
+const guessSection = typeof document !== 'undefined' ? document.getElementById('guess-section') : null;
+const guessInput = typeof document !== 'undefined' ? document.getElementById('guess-input') : null;
+const guessInputContainer = typeof document !== 'undefined' ? document.querySelector('.guess-input-container') : null;
+const skipBtn = typeof document !== 'undefined' ? document.getElementById('skip-btn') : null;
+const searchTypeDropdown = typeof document !== 'undefined' ? document.getElementById('search-type') : null;
+const endGameBtn = typeof document !== 'undefined' ? document.getElementById('end-game-btn') : null;
 
 // Hint Elements
-const mysteryTitle = document.getElementById('mystery-title');
-const hintStageBadge = document.getElementById('hint-stage-badge');
-const attemptTracker = document.getElementById('attempt-tracker');
-const hintCoverImg = document.getElementById('hint-cover-img');
-const hintBadges = document.getElementById('hint-badges');
-const snippetPlayBtn = document.getElementById('snippet-play-btn');
-const snippetIcon = document.getElementById('snippet-icon');
-const snippetLabel = document.getElementById('snippet-label');
-const snippetBar = document.getElementById('snippet-bar');
-const guessSubmitBtn = document.getElementById('guess-submit-btn');
-const guessSuggestions = document.getElementById('guess-suggestions');
+const mysteryTitle = typeof document !== 'undefined' ? document.getElementById('mystery-title') : null;
+const hintStageBadge = typeof document !== 'undefined' ? document.getElementById('hint-stage-badge') : null;
+const attemptTracker = typeof document !== 'undefined' ? document.getElementById('attempt-tracker') : null;
+const hintCoverImg = typeof document !== 'undefined' ? document.getElementById('hint-cover-img') : null;
+const hintBadges = typeof document !== 'undefined' ? document.getElementById('hint-badges') : null;
+const snippetPlayBtn = typeof document !== 'undefined' ? document.getElementById('snippet-play-btn') : null;
+const snippetIcon = typeof document !== 'undefined' ? document.getElementById('snippet-icon') : null;
+const snippetLabel = typeof document !== 'undefined' ? document.getElementById('snippet-label') : null;
+const snippetBar = typeof document !== 'undefined' ? document.getElementById('snippet-bar') : null;
+const guessSubmitBtn = typeof document !== 'undefined' ? document.getElementById('guess-submit-btn') : null;
+const guessSuggestions = typeof document !== 'undefined' ? document.getElementById('guess-suggestions') : null;
 
 // Variables
 let typeSection = "";
 let processedWords = [];
 let currentWordIndex = 0;
 let startTime = null;
+let endTime = null;
 let testStarted = false;
 let selectedTrack = null;
 let guessCount = 0;
@@ -44,8 +45,8 @@ let wpmInterval;
 let totalKeystrokes = 0;
 let errorKeystrokes = 0;
 let previousRawTyped = '';
-let finalWPM = 0;
-let finalAccuracy = 100;
+let finalWPM = null;
+let finalAccuracy = null;
 let gaveUp = false;
 // Hint & Snippet variables
 let hintStage = 1;
@@ -256,6 +257,7 @@ async function fakeTypePlaceholder(element, text, speed = 100) {
 function resetGame() {
     currentWordIndex = 0;
     startTime = null;
+    endTime = null;
     testStarted = false;
     guessCount = 0;
     sectionOne = "";
@@ -264,8 +266,8 @@ function resetGame() {
     totalKeystrokes = 0;
     errorKeystrokes = 0;
     previousRawTyped = '';
-    finalWPM = 0;
-    finalAccuracy = 100;
+    finalWPM = null;
+    finalAccuracy = null;
     gaveUp = false;
     hintStage = 1;
     attemptHistory = [];
@@ -274,21 +276,23 @@ function resetGame() {
     stopSnippet();
     hideSuggestions();
 
-    typingArea.value = '';
-    typingArea.style.display = 'block';
-    typingArea.disabled = true;
-    displayText.innerHTML = '';
-    wpmResult.textContent = '';
-    songInfo.innerHTML = '';
-    guessSection.style.display = 'none';
-    guessInput.value = '';
+    if (typingArea) {
+        typingArea.value = '';
+        typingArea.style.display = 'block';
+        typingArea.disabled = true;
+    }
+    if (displayText) displayText.innerHTML = '';
+    if (wpmResult) wpmResult.textContent = '';
+    if (songInfo) songInfo.innerHTML = '';
+    if (guessSection) guessSection.style.display = 'none';
+    if (guessInput) guessInput.value = '';
     if (guessInputContainer) guessInputContainer.classList.remove('shake');
     if (mysteryTitle) mysteryTitle.innerHTML = '';
-    removePunctuationCheckbox.disabled = false;
-    removeAdlibsCheckbox.disabled = false;
-    includeNumbersCheckbox.disabled = false;
-    searchTypeDropdown.disabled = false;
-    endGameBtn.style.display = 'none';
+    if (removePunctuationCheckbox) removePunctuationCheckbox.disabled = false;
+    if (removeAdlibsCheckbox) removeAdlibsCheckbox.disabled = false;
+    if (includeNumbersCheckbox) includeNumbersCheckbox.disabled = false;
+    if (searchTypeDropdown) searchTypeDropdown.disabled = false;
+    if (endGameBtn) endGameBtn.style.display = 'none';
 }
 
 function updateDisplayedText() {
@@ -360,8 +364,36 @@ function scrollCurrentWordIntoView() {
 
 function calculateWPM() {
     if (!startTime) return 0;
-    const elapsedTime = (new Date() - startTime) / 1000;
-    return Math.round((currentWordIndex / elapsedTime) * 60);
+    const now = endTime || new Date();
+    const elapsedTime = (now - startTime) / 1000;
+    if (elapsedTime <= 0) return 0;
+
+    let typedCharacters = 0;
+    if (processedWords && processedWords.length > 0) {
+        if (currentWordIndex >= processedWords.length) {
+            typedCharacters = processedWords.join(' ').length;
+        } else {
+            for (let i = 0; i < currentWordIndex; i++) {
+                typedCharacters += processedWords[i].length + 1; // completed word + delimiter space
+            }
+            if (typeof typingArea !== 'undefined' && typingArea && typingArea.value) {
+                const raw = typingArea.value.replace(/^\s+/, '');
+                const currentWord = processedWords[currentWordIndex] || '';
+                const expected = normalizeTextForTyping(currentWord);
+                for (let i = 0; i < raw.length && i < expected.length; i++) {
+                    if (raw[i] === expected[i]) {
+                        typedCharacters++;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    const words = typedCharacters / 5;
+    const minutes = elapsedTime / 60;
+    return Math.round(words / minutes);
 }
 
 function calculateAccuracy() {
@@ -371,7 +403,7 @@ function calculateAccuracy() {
 
 function startWPMUpdater() {
     wpmInterval = setInterval(() => {
-        wpmResult.textContent = `${calculateWPM()} WPM`;
+        if (wpmResult) wpmResult.textContent = `${calculateWPM()} WPM`;
     }, 2000);
 }
 
@@ -879,7 +911,7 @@ function showFinalInfo() {
     stopSnippet();
     hideSuggestions();
 
-    if (!finalWPM) {
+    if (finalWPM === null || finalWPM === undefined) {
         finalWPM = calculateWPM();
         finalAccuracy = calculateAccuracy();
     }
@@ -947,17 +979,20 @@ function scrollToSelectedLyrics() {
 }
 
 function endGame() {
+    endTime = new Date();
     stopWPMUpdater();
-    typingArea.disabled = true;
-    typingArea.style.display = 'none';
+    if (typingArea) {
+        typingArea.disabled = true;
+        typingArea.style.display = 'none';
+    }
     finalWPM = calculateWPM();
     finalAccuracy = calculateAccuracy();
-    wpmResult.textContent = `${finalWPM} WPM | ${finalAccuracy}% ACC`;
+    if (wpmResult) wpmResult.textContent = `${finalWPM} WPM | ${finalAccuracy}% ACC`;
     //Final WPM
-    guessSection.style.display = 'none';
-    endGameBtn.style.display = 'none';
+    if (guessSection) guessSection.style.display = 'none';
+    if (endGameBtn) endGameBtn.style.display = 'none';
 
-    const searchType = searchTypeDropdown.value;
+    const searchType = searchTypeDropdown ? searchTypeDropdown.value : 'artist';
     if (searchType === "song") {
         showFinalInfo();
     } else {
@@ -967,24 +1002,28 @@ function endGame() {
 
 // Event Listeners
 
-document.addEventListener('keydown', (event) => {
-    // Shift + Enter to restart the game
-    if (event.key === 'Enter' && event.shiftKey && typingArea.disabled) {
-        event.preventDefault();
-        startBtn.click();  // Restart the game
-    }
-});
+if (typeof document !== 'undefined') {
+    document.addEventListener('keydown', (event) => {
+        // Shift + Enter to restart the game
+        if (event.key === 'Enter' && event.shiftKey && typingArea && typingArea.disabled) {
+            event.preventDefault();
+            if (startBtn) startBtn.click();  // Restart the game
+        }
+    });
+}
 
-typingArea.addEventListener('input', () => {
+function handleTypingInput() {
     if (!startTime) {
         startTime = new Date();
         testStarted = true;
-        removePunctuationCheckbox.disabled = true;
-        removeAdlibsCheckbox.disabled = true;
-        includeNumbersCheckbox.disabled = true;
-        searchTypeDropdown.disabled = true;
+        if (removePunctuationCheckbox) removePunctuationCheckbox.disabled = true;
+        if (removeAdlibsCheckbox) removeAdlibsCheckbox.disabled = true;
+        if (includeNumbersCheckbox) includeNumbersCheckbox.disabled = true;
+        if (searchTypeDropdown) searchTypeDropdown.disabled = true;
         startWPMUpdater();
     }
+
+    if (!typingArea) return;
 
     // Ignore leading whitespace (e.g. a stray space at the start of a word)
     const rawTyped = typingArea.value.replace(/^\s+/, '');
@@ -1003,7 +1042,14 @@ typingArea.addEventListener('input', () => {
         for (let i = previousRawTyped.length; i < rawTyped.length; i++) {
             const typedChar = rawTyped[i];
             const expectedChar = normalizedCurrentWord[i];
-            if (!expectedChar || typedChar !== expectedChar) {
+            // If the user typed space immediately after typing the word correctly,
+            // this is the required delimiter space to advance words, not an error.
+            const isWordAdvancingSpace = (
+                typedChar === ' ' &&
+                i === normalizedCurrentWord.length &&
+                rawTyped.slice(0, i) === normalizedCurrentWord
+            );
+            if (!isWordAdvancingSpace && (!expectedChar || typedChar !== expectedChar)) {
                 errorKeystrokes++;
             }
         }
@@ -1013,12 +1059,9 @@ typingArea.addEventListener('input', () => {
     // Like TypeRacer: the word must be correct AND followed by a space to move on.
     // The final word finishes the test as soon as it's typed correctly.
     if (normalizedTypedText === normalizedCurrentWord && (endsWithSpace || isLastWord)) {
-        if (endsWithSpace) {
-            totalKeystrokes += 1;
-        }
         previousRawTyped = '';
         typingArea.value = '';
-        typingArea.classList.remove('incorrect');
+        if (typingArea.classList) typingArea.classList.remove('incorrect');
         // Clear per-character state on the finished word; it's coloured green as a whole
         renderWordProgress(currentWordIndex, '', false);
         currentWordIndex++;
@@ -1026,7 +1069,7 @@ typingArea.addEventListener('input', () => {
 
         if (currentWordIndex === processedWords.length) {
             endGame();
-            searchTypeDropdown.disabled = false;
+            if (searchTypeDropdown) searchTypeDropdown.disabled = false;
         }
         return;
     }
@@ -1038,14 +1081,18 @@ typingArea.addEventListener('input', () => {
     renderWordProgress(currentWordIndex, typedForDisplay);
 
     if (!normalizedCurrentWord.startsWith(typedForDisplay)) {
-        typingArea.classList.add('incorrect');
+        if (typingArea.classList) typingArea.classList.add('incorrect');
     } else {
-        typingArea.classList.remove('incorrect');
+        if (typingArea.classList) typingArea.classList.remove('incorrect');
     }
 
     // wpmResult.textContent = `${calculateWPM()}`;
     // //CurrentWPM
-});
+}
+
+if (typingArea) {
+    typingArea.addEventListener('input', handleTypingInput);
+}
 
 // Backspace safety net: if the current word is typed correctly but has extra characters after it
 // (e.g. "cantl" for "cant"), Ctrl/Alt+Backspace only removes the extras, and a burst of backspaces
@@ -1054,89 +1101,93 @@ typingArea.addEventListener('input', () => {
 const BACKSPACE_BURST_MS = 500;
 let backspaceLockUntil = 0;
 
-typingArea.addEventListener('keydown', (event) => {
-    // Only space moves to the next word, so don't let Enter insert a newline in the typing box
-    if (event.key === 'Enter') {
-        event.preventDefault();
-        return;
-    }
-    if (['Control', 'Alt', 'Meta', 'Shift'].includes(event.key)) return;
-    if (event.key !== 'Backspace') {
-        backspaceLockUntil = 0; // any other key ends the backspace burst
-        return;
-    }
-
-    const value = typingArea.value;
-    const word = processedWords[currentWordIndex];
-    const caretAtEnd = typingArea.selectionStart === value.length && typingArea.selectionEnd === value.length;
-    if (word === undefined || !caretAtEnd) return; // let normal editing happen for selections etc.
-
-    const now = performance.now();
-    const typed = normalizeTextForTyping(value);
-    const hasExtrasAfterCorrectWord = typed.length > word.length && typed.startsWith(word);
-
-    // Already stopped at the correct word during this burst: hold the line
-    if (typed === word && (event.repeat || now < backspaceLockUntil)) {
-        event.preventDefault();
-        backspaceLockUntil = now + BACKSPACE_BURST_MS;
-        return;
-    }
-
-    if (!hasExtrasAfterCorrectWord) return;
-
-    if (event.ctrlKey || event.altKey || event.metaKey) {
-        // Word-delete: strip only the extra characters, keep the correct word
-        event.preventDefault();
-        typingArea.value = word;
-        typingArea.dispatchEvent(new Event('input'));
-        backspaceLockUntil = now + BACKSPACE_BURST_MS;
-    } else if (normalizeTextForTyping(value.slice(0, -1)) === word) {
-        // This plain backspace removes the last extra character; lock further backspaces in the burst
-        backspaceLockUntil = now + BACKSPACE_BURST_MS;
-    }
-});
-
-guessInput.addEventListener('input', () => {
-    filterAndShowSuggestions(guessInput.value);
-});
-
-guessInput.addEventListener('keydown', (event) => {
-    const items = guessSuggestions ? guessSuggestions.querySelectorAll('.guess-suggestion-item') : [];
-
-    if (event.key === 'ArrowDown') {
-        if (items.length === 0) return;
-        event.preventDefault();
-        suggestionSelectedIndex = (suggestionSelectedIndex + 1) % items.length;
-        items.forEach((item, idx) => item.classList.toggle('selected', idx === suggestionSelectedIndex));
-        if (items[suggestionSelectedIndex]) {
-            guessInput.value = items[suggestionSelectedIndex].getAttribute('data-title');
+if (typingArea) {
+    typingArea.addEventListener('keydown', (event) => {
+        // Only space moves to the next word, so don't let Enter insert a newline in the typing box
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            return;
         }
-        return;
-    }
-
-    if (event.key === 'ArrowUp') {
-        if (items.length === 0) return;
-        event.preventDefault();
-        suggestionSelectedIndex = (suggestionSelectedIndex - 1 + items.length) % items.length;
-        items.forEach((item, idx) => item.classList.toggle('selected', idx === suggestionSelectedIndex));
-        if (items[suggestionSelectedIndex]) {
-            guessInput.value = items[suggestionSelectedIndex].getAttribute('data-title');
+        if (['Control', 'Alt', 'Meta', 'Shift'].includes(event.key)) return;
+        if (event.key !== 'Backspace') {
+            backspaceLockUntil = 0; // any other key ends the backspace burst
+            return;
         }
-        return;
-    }
 
-    if (event.key === 'Enter') {
-        event.preventDefault();
-        hideSuggestions();
-        handleGuess();
-        return;
-    }
+        const value = typingArea.value;
+        const word = processedWords[currentWordIndex];
+        const caretAtEnd = typingArea.selectionStart === value.length && typingArea.selectionEnd === value.length;
+        if (word === undefined || !caretAtEnd) return; // let normal editing happen for selections etc.
 
-    if (event.key === 'Escape') {
-        hideSuggestions();
-        return;
-    }
-});
+        const now = performance.now();
+        const typed = normalizeTextForTyping(value);
+        const hasExtrasAfterCorrectWord = typed.length > word.length && typed.startsWith(word);
+
+        // Already stopped at the correct word during this burst: hold the line
+        if (typed === word && (event.repeat || now < backspaceLockUntil)) {
+            event.preventDefault();
+            backspaceLockUntil = now + BACKSPACE_BURST_MS;
+            return;
+        }
+
+        if (!hasExtrasAfterCorrectWord) return;
+
+        if (event.ctrlKey || event.altKey || event.metaKey) {
+            // Word-delete: strip only the extra characters, keep the correct word
+            event.preventDefault();
+            typingArea.value = word;
+            typingArea.dispatchEvent(new Event('input'));
+            backspaceLockUntil = now + BACKSPACE_BURST_MS;
+        } else if (normalizeTextForTyping(value.slice(0, -1)) === word) {
+            // This plain backspace removes the last extra character; lock further backspaces in the burst
+            backspaceLockUntil = now + BACKSPACE_BURST_MS;
+        }
+    });
+}
+
+if (guessInput) {
+    guessInput.addEventListener('input', () => {
+        filterAndShowSuggestions(guessInput.value);
+    });
+
+    guessInput.addEventListener('keydown', (event) => {
+        const items = guessSuggestions ? guessSuggestions.querySelectorAll('.guess-suggestion-item') : [];
+
+        if (event.key === 'ArrowDown') {
+            if (items.length === 0) return;
+            event.preventDefault();
+            suggestionSelectedIndex = (suggestionSelectedIndex + 1) % items.length;
+            items.forEach((item, idx) => item.classList.toggle('selected', idx === suggestionSelectedIndex));
+            if (items[suggestionSelectedIndex]) {
+                guessInput.value = items[suggestionSelectedIndex].getAttribute('data-title');
+            }
+            return;
+        }
+
+        if (event.key === 'ArrowUp') {
+            if (items.length === 0) return;
+            event.preventDefault();
+            suggestionSelectedIndex = (suggestionSelectedIndex - 1 + items.length) % items.length;
+            items.forEach((item, idx) => item.classList.toggle('selected', idx === suggestionSelectedIndex));
+            if (items[suggestionSelectedIndex]) {
+                guessInput.value = items[suggestionSelectedIndex].getAttribute('data-title');
+            }
+            return;
+        }
+
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            hideSuggestions();
+            handleGuess();
+            return;
+        }
+
+        if (event.key === 'Escape') {
+            hideSuggestions();
+            return;
+        }
+    });
+}
 
 if (guessSubmitBtn) {
     guessSubmitBtn.addEventListener('click', () => {
@@ -1153,90 +1204,103 @@ if (snippetPlayBtn) {
     snippetPlayBtn.addEventListener('click', playSnippet);
 }
 
-document.addEventListener('click', (event) => {
-    if (!event.target.closest('.guess-input-wrapper')) {
-        hideSuggestions();
-    }
-});
+if (typeof document !== 'undefined') {
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.guess-input-wrapper')) {
+            hideSuggestions();
+        }
+    });
+}
 
-removePunctuationCheckbox.addEventListener('change', () => {
-    if (!testStarted) updateDisplayedText();
-});
+if (removePunctuationCheckbox) {
+    removePunctuationCheckbox.addEventListener('change', () => {
+        if (!testStarted) updateDisplayedText();
+    });
+}
 
-removeAdlibsCheckbox.addEventListener('change', () => {
-    if (!testStarted) updateDisplayedText();
-});
+if (removeAdlibsCheckbox) {
+    removeAdlibsCheckbox.addEventListener('change', () => {
+        if (!testStarted) updateDisplayedText();
+    });
+}
 
-includeNumbersCheckbox.addEventListener('change', () => {
-    if (!testStarted) updateDisplayedText();
-});
+if (includeNumbersCheckbox) {
+    includeNumbersCheckbox.addEventListener('change', () => {
+        if (!testStarted) updateDisplayedText();
+    });
+}
 
-startBtn.addEventListener('click', async () => {
-    const inputValue = artistInput.value.trim();
-    const searchType = searchTypeDropdown.value; // "Artist","Song"
-    stopWPMUpdater();
-    
+if (startBtn) {
+    startBtn.addEventListener('click', async () => {
+        const inputValue = artistInput ? artistInput.value.trim() : '';
+        const searchType = searchTypeDropdown ? searchTypeDropdown.value : 'artist';
+        stopWPMUpdater();
 
-    if (searchType !== 'artist' && searchType !== 'song') {
-        searchType = 'artist'; // default
-    }
+        if (searchType !== 'artist' && searchType !== 'song') {
+            searchType = 'artist'; // default
+        }
 
-    if (!inputValue) {
-        loadDefaultPlaylist();
+        if (!inputValue) {
+            loadDefaultPlaylist();
+            resetGame();
+            return;
+        }
+
+        startBtn.disabled = true;
         resetGame();
-        return;
-    }
 
-    startBtn.disabled = true;
-    resetGame();
-
-    try {
-        if (searchType === 'artist') {
-            await handleArtistSearch(inputValue);
-        } else if (searchType === 'song') {
-            await handleSongSearch(inputValue);
-        } else {
-            throw new Error('Invalid search type selected.');
+        try {
+            if (searchType === 'artist') {
+                await handleArtistSearch(inputValue);
+            } else if (searchType === 'song') {
+                await handleSongSearch(inputValue);
+            } else {
+                throw new Error('Invalid search type selected.');
+            }
+        } catch (error) {
+            alert(error.message);
+        } finally {
+            startBtn.disabled = false;
         }
-    } catch (error) {
-        alert(error.message);
-    } finally {
-        startBtn.disabled = false;
-    }
-});
+    });
+}
 
-artistInput.addEventListener('keydown', function(event) {
-    if (event.key === 'Enter') {
-        event.preventDefault(); 
-        startBtn.click(); 
-    }
-});
-
-endGameBtn.addEventListener('click', () => {
-    endGame();
-    searchTypeDropdown.disabled = false;
-});
-
-window.addEventListener('DOMContentLoaded', () => {
-    artistInput.focus();
-    const titleElement = document.querySelector('.navbar-title');
-    const titleText = 'TuneTyper';
-    let index = 0;
-
-    function typeNavbarTitle() {
-        if (index < titleText.length) {
-            titleElement.textContent += titleText.charAt(index);
-            index++;
-            setTimeout(typeNavbarTitle, 75);  
+if (artistInput) {
+    artistInput.addEventListener('keydown', function(event) {
+        if (event.key === 'Enter') {
+            event.preventDefault(); 
+            if (startBtn) startBtn.click(); 
         }
-    }
+    });
+}
 
-    
-    titleElement.textContent = '';
-    typeNavbarTitle();
+if (endGameBtn) {
+    endGameBtn.addEventListener('click', () => {
+        endGame();
+        if (searchTypeDropdown) searchTypeDropdown.disabled = false;
+    });
+}
 
-});
-window.addEventListener('DOMContentLoaded', loadDefaultPlaylist);
+if (typeof window !== 'undefined') {
+    window.addEventListener('DOMContentLoaded', () => {
+        if (artistInput) artistInput.focus();
+        const titleElement = document.querySelector('.navbar-title');
+        const titleText = 'TuneTyper';
+        let index = 0;
+
+        function typeNavbarTitle() {
+            if (index < titleText.length) {
+                if (titleElement) titleElement.textContent += titleText.charAt(index);
+                index++;
+                setTimeout(typeNavbarTitle, 75);  
+            }
+        }
+
+        if (titleElement) titleElement.textContent = '';
+        typeNavbarTitle();
+    });
+    window.addEventListener('DOMContentLoaded', loadDefaultPlaylist);
+}
 
 // Button Logic
 async function handleArtistSearch(artistName) {
@@ -1327,30 +1391,33 @@ async function tryFetchLyricsFromTracks(tracks) {
 }
 
 // Loading Bar
-const loadingBarContainer = document.createElement('div');
-loadingBarContainer.id = 'loading-bar-container';
-loadingBarContainer.style.position = 'fixed';
-loadingBarContainer.style.top = '0';
-loadingBarContainer.style.left = '0';
-loadingBarContainer.style.width = '100%';
-loadingBarContainer.style.height = '4px';
-loadingBarContainer.style.backgroundColor = '#333';
-loadingBarContainer.style.zIndex = '1000';
-
-const loadingBar = document.createElement('div');
-loadingBar.id = 'loading-bar';
-loadingBar.style.width = '0%';
-loadingBar.style.height = '100%';
-loadingBar.style.backgroundColor = '#4caf50';
-loadingBar.style.transition = 'width 0.3s ease-in-out';
-
-loadingBarContainer.appendChild(loadingBar);
-document.body.prepend(loadingBarContainer);
-
-
-// Loading Bar Logic
 let loadingInterval;
+let loadingBar = null;
+
+if (typeof document !== 'undefined') {
+    const loadingBarContainer = document.createElement('div');
+    loadingBarContainer.id = 'loading-bar-container';
+    loadingBarContainer.style.position = 'fixed';
+    loadingBarContainer.style.top = '0';
+    loadingBarContainer.style.left = '0';
+    loadingBarContainer.style.width = '100%';
+    loadingBarContainer.style.height = '4px';
+    loadingBarContainer.style.backgroundColor = '#333';
+    loadingBarContainer.style.zIndex = '1000';
+
+    loadingBar = document.createElement('div');
+    loadingBar.id = 'loading-bar';
+    loadingBar.style.width = '0%';
+    loadingBar.style.height = '100%';
+    loadingBar.style.backgroundColor = '#4caf50';
+    loadingBar.style.transition = 'width 0.3s ease-in-out';
+
+    loadingBarContainer.appendChild(loadingBar);
+    document.body.prepend(loadingBarContainer);
+}
+
 function startLoadingBar() {
+    if (!loadingBar) return;
     loadingBar.style.width = '5%';
     let progress = 5;
 
@@ -1360,14 +1427,49 @@ function startLoadingBar() {
         } else if (progress < 95) {
             progress += 5;
         }
-        loadingBar.style.width = progress + '%';
+        if (loadingBar) loadingBar.style.width = progress + '%';
     }, 1000);
 }
 
 function stopLoadingBar() {
     clearInterval(loadingInterval);
+    if (!loadingBar) return;
     loadingBar.style.width = '100%';
     setTimeout(() => {
-        loadingBar.style.width = '0%';
+        if (loadingBar) loadingBar.style.width = '0%';
     }, 500);
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        calculateWPM,
+        calculateAccuracy,
+        normalizeTextForTyping,
+        normalizeText,
+        resetGame,
+        endGame,
+        handleTypingInput,
+        _getState: () => ({
+            totalKeystrokes,
+            errorKeystrokes,
+            previousRawTyped,
+            currentWordIndex,
+            processedWords,
+            startTime,
+            endTime,
+            finalWPM,
+            finalAccuracy
+        }),
+        _setState: (state) => {
+            if ('totalKeystrokes' in state) totalKeystrokes = state.totalKeystrokes;
+            if ('errorKeystrokes' in state) errorKeystrokes = state.errorKeystrokes;
+            if ('previousRawTyped' in state) previousRawTyped = state.previousRawTyped;
+            if ('currentWordIndex' in state) currentWordIndex = state.currentWordIndex;
+            if ('processedWords' in state) processedWords = state.processedWords;
+            if ('startTime' in state) startTime = state.startTime;
+            if ('endTime' in state) endTime = state.endTime;
+            if ('finalWPM' in state) finalWPM = state.finalWPM;
+            if ('finalAccuracy' in state) finalAccuracy = state.finalAccuracy;
+        }
+    };
 }
