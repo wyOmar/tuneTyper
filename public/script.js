@@ -15,6 +15,19 @@ const guessFeedback = document.getElementById('guess-feedback');
 const searchTypeDropdown = document.getElementById('search-type');
 const endGameBtn = document.getElementById('end-game-btn');
 
+// Hint Elements
+const mysteryTitle = document.getElementById('mystery-title');
+const hintStageBadge = document.getElementById('hint-stage-badge');
+const nextHintBtn = document.getElementById('next-hint-btn');
+const hintCoverImg = document.getElementById('hint-cover-img');
+const hintBadges = document.getElementById('hint-badges');
+const snippetPlayBtn = document.getElementById('snippet-play-btn');
+const snippetIcon = document.getElementById('snippet-icon');
+const snippetLabel = document.getElementById('snippet-label');
+const snippetBar = document.getElementById('snippet-bar');
+const guessSubmitBtn = document.getElementById('guess-submit-btn');
+const guessSuggestions = document.getElementById('guess-suggestions');
+
 // Variables
 let typeSection = "";
 let processedWords = [];
@@ -34,6 +47,17 @@ let previousRawTyped = '';
 let finalWPM = 0;
 let finalAccuracy = 100;
 let gaveUp = false;
+// Hint & Snippet variables
+let hintStage = 1;
+const SNIPPET_DURATIONS = [2, 5, 10, 18, 30];
+let snippetAudio = null;
+let snippetProgressAnim = null;
+let isSnippetPlaying = false;
+let revealedLetters = new Set();
+let candidateSongs = [];
+let trackExtraDetails = null;
+let suggestionSelectedIndex = -1;
+let debounceSuggestTimeout = null;
 // Lyrics variables
 let sectionOne = "";
 let sectionTwo = "";
@@ -243,6 +267,12 @@ function resetGame() {
     finalWPM = 0;
     finalAccuracy = 100;
     gaveUp = false;
+    hintStage = 1;
+    revealedLetters.clear();
+    candidateSongs = [];
+    trackExtraDetails = null;
+    stopSnippet();
+    hideSuggestions();
 
     typingArea.value = '';
     typingArea.style.display = 'block';
@@ -253,6 +283,7 @@ function resetGame() {
     guessSection.style.display = 'none';
     guessFeedback.innerHTML = '';
     guessInput.value = '';
+    if (mysteryTitle) mysteryTitle.innerHTML = '';
     removePunctuationCheckbox.disabled = false;
     removeAdlibsCheckbox.disabled = false;
     includeNumbersCheckbox.disabled = false;
@@ -348,62 +379,378 @@ function stopWPMUpdater() {
     clearInterval(wpmInterval);
 }
 
-function handleGuess() {
-    const userGuess = normalizeText(guessInput.value);
-    const correctAnswerOriginal = selectedTrack.title;
+function formatDuration(seconds) {
+    if (!seconds) return '—';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
 
-    const correctAnswerProcessed = removeParentheses(correctAnswerOriginal);
+function populateCandidateSongs() {
+    candidateSongs = [];
+    const seen = new Set();
+
+    if (artistTracks && artistTracks.length > 0) {
+        artistTracks.forEach(t => {
+            const clean = removeParentheses(t.title).trim();
+            if (clean && !seen.has(clean.toLowerCase())) {
+                seen.add(clean.toLowerCase());
+                candidateSongs.push({ title: clean, artist: t.artist.name });
+            }
+        });
+    }
+
+    if (selectedTrack) {
+        const cleanSelected = removeParentheses(selectedTrack.title).trim();
+        if (cleanSelected && !seen.has(cleanSelected.toLowerCase())) {
+            seen.add(cleanSelected.toLowerCase());
+            candidateSongs.push({ title: cleanSelected, artist: selectedTrack.artist.name });
+        }
+    }
+}
+
+async function fetchTrackDetails(trackId) {
+    trackExtraDetails = null;
+    if (!trackId) return;
+    try {
+        const res = await fetch(`/track-details?trackId=${encodeURIComponent(trackId)}`);
+        if (res.ok) {
+            trackExtraDetails = await res.json();
+            if (guessSection.style.display !== 'none') {
+                updateHintsUI();
+            }
+        }
+    } catch (err) {
+        console.warn('Could not fetch track details:', err);
+    }
+}
+
+function startGuessingPhase() {
+    guessCount = 0;
+    hintStage = 1;
+    revealedLetters.clear();
+    trackExtraDetails = null;
+    stopSnippet();
+    hideSuggestions();
+
+    guessFeedback.innerHTML = '';
+    guessInput.value = '';
+
+    populateCandidateSongs();
+
+    if (selectedTrack && selectedTrack.id) {
+        fetchTrackDetails(selectedTrack.id);
+    }
+
+    renderMysteryTitle();
+    updateHintsUI();
+
+    guessSection.style.display = 'block';
+    guessInput.focus();
+}
+
+function renderMysteryTitle() {
+    if (!selectedTrack || !mysteryTitle) return;
+    const cleanTitle = removeParentheses(selectedTrack.title).trim();
+    const words = cleanTitle.split(/\s+/).filter(Boolean);
+
+    // If hintStage >= 4, auto-reveal first letter of each word
+    const autoFirstLetters = new Set();
+    if (hintStage >= 4) {
+        words.forEach(word => {
+            for (let i = 0; i < word.length; i++) {
+                if (/[a-z0-9]/i.test(word[i])) {
+                    autoFirstLetters.add(word[i].toUpperCase());
+                    break;
+                }
+            }
+        });
+    }
+
+    let totalLetters = 0;
+    const wordsHtml = words.map(word => {
+        let charsHtml = '';
+        for (let i = 0; i < word.length; i++) {
+            const ch = word[i];
+            const isAlpha = /[a-z0-9]/i.test(ch);
+            if (isAlpha) {
+                totalLetters++;
+                const upper = ch.toUpperCase();
+                const isRevealed = revealedLetters.has(upper) || autoFirstLetters.has(upper);
+                if (isRevealed) {
+                    charsHtml += `<span class="mystery-char revealed">${escapeHtml(upper)}</span>`;
+                } else {
+                    charsHtml += `<span class="mystery-char">_</span>`;
+                }
+            } else {
+                charsHtml += `<span class="mystery-char punct">${escapeHtml(ch)}</span>`;
+            }
+        }
+        return `<span class="mystery-word">${charsHtml}</span>`;
+    }).join(' ');
+
+    const summary = `<div style="width: 100%; text-align: center; font-size: 12px; color: #888; margin-top: 6px;">${words.length} word${words.length === 1 ? '' : 's'} • ${totalLetters} letters</div>`;
+
+    mysteryTitle.innerHTML = wordsHtml + summary;
+}
+
+function updateHintsUI() {
+    if (!selectedTrack) return;
+
+    if (hintStageBadge) {
+        hintStageBadge.textContent = `Hint ${hintStage} / 5`;
+    }
+
+    // Progressive Album Cover
+    if (hintCoverImg) {
+        if (selectedTrack.album && selectedTrack.album.cover_medium) {
+            hintCoverImg.src = selectedTrack.album.cover_medium;
+            hintCoverImg.alt = selectedTrack.album.title || 'Album Art';
+        }
+        hintCoverImg.className = `hint-cover-img blur-stage-${hintStage}`;
+    }
+
+    // Next Hint Button
+    if (nextHintBtn) {
+        if (hintStage >= 5) {
+            nextHintBtn.disabled = true;
+            nextHintBtn.textContent = 'All hints unlocked';
+        } else {
+            nextHintBtn.disabled = false;
+            nextHintBtn.textContent = '💡 Next Hint';
+        }
+    }
+
+    // Metadata Badges
+    if (hintBadges) {
+        const badges = [];
+        badges.push(`<span class="meta-pill">🎤 Artist: <strong>${escapeHtml(selectedTrack.artist.name)}</strong></span>`);
+        badges.push(`<span class="meta-pill">⏱️ Length: <strong>${formatDuration(selectedTrack.duration)}</strong></span>`);
+
+        if (hintStage >= 2 && selectedTrack.album && selectedTrack.album.title) {
+            badges.push(`<span class="meta-pill highlight">💿 Album: <strong>${escapeHtml(selectedTrack.album.title)}</strong></span>`);
+        }
+
+        if (hintStage >= 3) {
+            if (trackExtraDetails && trackExtraDetails.release_date) {
+                const year = trackExtraDetails.release_date.split('-')[0];
+                badges.push(`<span class="meta-pill highlight">📅 Year: <strong>${escapeHtml(year)}</strong></span>`);
+            } else {
+                badges.push(`<span class="meta-pill highlight">💿 Studio Track</span>`);
+            }
+        }
+
+        if (hintStage >= 4) {
+            badges.push(`<span class="meta-pill highlight">🔤 First letters revealed</span>`);
+        }
+
+        if (hintStage >= 5) {
+            badges.push(`<span class="meta-pill highlight">🎧 Full 30s audio</span>`);
+        }
+
+        hintBadges.innerHTML = badges.join('');
+    }
+
+    // Snippet button label
+    const allowedDuration = SNIPPET_DURATIONS[hintStage - 1];
+    if (snippetLabel) {
+        snippetLabel.textContent = isSnippetPlaying ? `Playing... (${allowedDuration}s)` : `Play snippet (${allowedDuration}s)`;
+    }
+}
+
+function playSnippet() {
+    if (!selectedTrack || !selectedTrack.preview) {
+        alert('Audio snippet preview unavailable for this track.');
+        return;
+    }
+
+    if (isSnippetPlaying) {
+        stopSnippet();
+        return;
+    }
+
+    if (snippetAudio) {
+        snippetAudio.pause();
+    }
+
+    snippetAudio = new Audio(selectedTrack.preview);
+    snippetAudio.volume = 0.35;
+    const allowedDuration = SNIPPET_DURATIONS[hintStage - 1];
+
+    isSnippetPlaying = true;
+    if (snippetPlayBtn) snippetPlayBtn.classList.add('playing');
+    if (snippetIcon) snippetIcon.textContent = '❚❚';
+    if (snippetLabel) snippetLabel.textContent = `Playing... (${allowedDuration}s)`;
+    if (snippetBar) snippetBar.style.width = '0%';
+
+    snippetAudio.play().then(() => {
+        snippetProgressAnim = setInterval(() => {
+            if (!snippetAudio || snippetAudio.paused) return;
+            const current = snippetAudio.currentTime;
+            const pct = Math.min(100, (current / allowedDuration) * 100);
+            if (snippetBar) snippetBar.style.width = pct + '%';
+
+            if (current >= allowedDuration) {
+                stopSnippet();
+            }
+        }, 50);
+    }).catch(err => {
+        console.warn('Audio snippet playback blocked:', err);
+        stopSnippet();
+    });
+
+    snippetAudio.addEventListener('ended', stopSnippet, { once: true });
+}
+
+function stopSnippet() {
+    if (snippetAudio) {
+        snippetAudio.pause();
+        snippetAudio.currentTime = 0;
+    }
+    if (snippetProgressAnim) {
+        clearInterval(snippetProgressAnim);
+        snippetProgressAnim = null;
+    }
+    isSnippetPlaying = false;
+    if (snippetPlayBtn) snippetPlayBtn.classList.remove('playing');
+    if (snippetIcon) snippetIcon.textContent = '▶';
+    if (snippetBar) snippetBar.style.width = '0%';
+    if (snippetLabel) {
+        const allowedDuration = SNIPPET_DURATIONS[hintStage - 1];
+        snippetLabel.textContent = `Play snippet (${allowedDuration}s)`;
+    }
+}
+
+function advanceHint() {
+    if (hintStage >= 5) return;
+    stopSnippet();
+    hintStage++;
+    guessCount++;
+    updateHintsUI();
+    renderMysteryTitle();
+    guessFeedback.innerHTML = `<span style="color: #4caf50;">💡 Hint ${hintStage} unlocked!</span>`;
+    guessInput.focus();
+}
+
+function handleGuess() {
+    stopSnippet();
+    hideSuggestions();
+
+    const rawGuess = guessInput.value.trim();
+    if (!rawGuess) {
+        guessFeedback.innerHTML = '<span style="color: #ff9800;">Please type a song guess or pick a suggestion!</span>';
+        return;
+    }
+
+    const userGuess = normalizeText(rawGuess);
+    const correctAnswerOriginal = selectedTrack.title;
+    const correctAnswerProcessed = removeParentheses(correctAnswerOriginal).trim();
     const correctAnswer = normalizeText(correctAnswerProcessed);
 
     guessCount++;
 
     if (userGuess === correctAnswer) {
         showFinalInfo();
-    } else {
-        const partialHint = getPartialMatchHint(userGuess, correctAnswerProcessed);
+        return;
+    }
 
-        if (guessCount === 1) {
-            guessFeedback.innerHTML = `
-                <span style="color: red;">Wrong! Hint:</span><br>
-                <span style="font-size: 1.2em;">${partialHint}</span>
-            `;
-            songInfo.innerHTML = `<img id="album-image" src="${selectedTrack.album.cover_medium}" alt="${selectedTrack.album.title}">`;
-            giveUpButton.style.display = 'block';
-        } else {
-            guessFeedback.innerHTML = `<span style="color: red;">Wrong again! Hint: ${partialHint}</span>`;
+    // Add matching letters to revealed set
+    const targetNorm = correctAnswerProcessed.toLowerCase();
+    for (const char of userGuess) {
+        if (/[a-z0-9]/i.test(char) && targetNorm.includes(char.toLowerCase())) {
+            revealedLetters.add(char.toUpperCase());
         }
     }
+
+    if (hintStage < 5) {
+        hintStage++;
+    }
+
+    updateHintsUI();
+    renderMysteryTitle();
+
+    guessInput.value = '';
+    guessFeedback.innerHTML = `<span style="color: #f44336;">Incorrect! Hint ${hintStage} unlocked below.</span>`;
+    guessInput.focus();
 }
 
-function getPartialMatchHint(userGuess, correctAnswer) {
-
-    const userGuessNorm = userGuess.toLowerCase();
-    const correctAnswerNorm = correctAnswer.toLowerCase();
-    const length = correctAnswer.length;
-    let hint = '';
-    let j = 0; // index into the normalized guess, which has no spaces/punctuation
-
-    for (let i = 0; i < length; i++) {
-        const correctChar = correctAnswer[i];
-        if (correctChar === ' ') {
-            hint += ' ';
-        } else {
-            const guessChar = /[a-z0-9]/i.test(correctChar) ? (userGuessNorm[j++] || '') : correctChar.toLowerCase();
-
-            if (guessChar === correctChar.toLowerCase()) {
-                hint += correctChar;
-            } else {
-                hint += '_';
-            }
-        }
+function showSuggestions(list) {
+    if (!guessSuggestions) return;
+    if (!list || list.length === 0) {
+        hideSuggestions();
+        return;
     }
 
-    return hint.trimEnd();
+    suggestionSelectedIndex = -1;
+    guessSuggestions.innerHTML = list.map((item, idx) => `
+        <li class="guess-suggestion-item" data-index="${idx}" data-title="${escapeHtml(item.title)}">
+            <span class="item-title">${escapeHtml(item.title)}</span>
+            <span class="item-artist">${escapeHtml(item.artist || '')}</span>
+        </li>
+    `).join('');
+
+    guessSuggestions.style.display = 'block';
+
+    guessSuggestions.querySelectorAll('.guess-suggestion-item').forEach(itemEl => {
+        itemEl.addEventListener('click', () => {
+            const title = itemEl.getAttribute('data-title');
+            guessInput.value = title;
+            hideSuggestions();
+            handleGuess();
+        });
+    });
+}
+
+function hideSuggestions() {
+    if (guessSuggestions) {
+        guessSuggestions.style.display = 'none';
+        guessSuggestions.innerHTML = '';
+    }
+    suggestionSelectedIndex = -1;
+}
+
+function filterAndShowSuggestions(query) {
+    if (!query) {
+        hideSuggestions();
+        return;
+    }
+
+    const q = query.toLowerCase().trim();
+    const matches = candidateSongs.filter(s => s.title.toLowerCase().includes(q)).slice(0, 6);
+
+    if (matches.length > 0) {
+        showSuggestions(matches);
+    } else {
+        clearTimeout(debounceSuggestTimeout);
+        debounceSuggestTimeout = setTimeout(async () => {
+            try {
+                const res = await fetch(`/tracks?artist=${encodeURIComponent(query)}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.data && data.data.length > 0) {
+                        const fetchedMatches = [];
+                        const seen = new Set();
+                        data.data.slice(0, 6).forEach(t => {
+                            const clean = removeParentheses(t.title).trim();
+                            if (clean && !seen.has(clean.toLowerCase())) {
+                                seen.add(clean.toLowerCase());
+                                fetchedMatches.push({ title: clean, artist: t.artist.name });
+                            }
+                        });
+                        showSuggestions(fetchedMatches);
+                    } else {
+                        hideSuggestions();
+                    }
+                }
+            } catch (err) {
+                console.warn('Error fetching suggestions:', err);
+            }
+        }, 250);
+    }
 }
 
 function removeParentheses(str) {
     return str.replace(/\(.*?\)/g, '').trimEnd() + ' ';
-
 }
 
 function generateShareText() {
@@ -506,6 +853,9 @@ async function copyShareScore() {
 }
 
 function showFinalInfo() {
+    stopSnippet();
+    hideSuggestions();
+
     if (!finalWPM) {
         finalWPM = calculateWPM();
         finalAccuracy = calculateAccuracy();
@@ -573,6 +923,8 @@ function scrollToSelectedLyrics() {
 
 function giveUp() {
     gaveUp = true;
+    stopSnippet();
+    hideSuggestions();
     showFinalInfo();
 }
 giveUpButton.addEventListener('click', giveUp);
@@ -592,8 +944,7 @@ function endGame() {
     if (searchType === "song") {
         showFinalInfo();
     } else {
-        guessSection.style.display = 'block';
-        guessInput.focus(); 
+        startGuessingPhase();
     }
 }
 
@@ -728,13 +1079,67 @@ typingArea.addEventListener('keydown', (event) => {
     }
 });
 
+guessInput.addEventListener('input', () => {
+    filterAndShowSuggestions(guessInput.value);
+});
+
 guessInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
+    const items = guessSuggestions ? guessSuggestions.querySelectorAll('.guess-suggestion-item') : [];
+
+    if (event.key === 'ArrowDown') {
+        if (items.length === 0) return;
         event.preventDefault();
-        handleGuess();
+        suggestionSelectedIndex = (suggestionSelectedIndex + 1) % items.length;
+        items.forEach((item, idx) => item.classList.toggle('selected', idx === suggestionSelectedIndex));
+        if (items[suggestionSelectedIndex]) {
+            guessInput.value = items[suggestionSelectedIndex].getAttribute('data-title');
+        }
+        return;
     }
 
-    
+    if (event.key === 'ArrowUp') {
+        if (items.length === 0) return;
+        event.preventDefault();
+        suggestionSelectedIndex = (suggestionSelectedIndex - 1 + items.length) % items.length;
+        items.forEach((item, idx) => item.classList.toggle('selected', idx === suggestionSelectedIndex));
+        if (items[suggestionSelectedIndex]) {
+            guessInput.value = items[suggestionSelectedIndex].getAttribute('data-title');
+        }
+        return;
+    }
+
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        hideSuggestions();
+        handleGuess();
+        return;
+    }
+
+    if (event.key === 'Escape') {
+        hideSuggestions();
+        return;
+    }
+});
+
+if (guessSubmitBtn) {
+    guessSubmitBtn.addEventListener('click', () => {
+        hideSuggestions();
+        handleGuess();
+    });
+}
+
+if (nextHintBtn) {
+    nextHintBtn.addEventListener('click', advanceHint);
+}
+
+if (snippetPlayBtn) {
+    snippetPlayBtn.addEventListener('click', playSnippet);
+}
+
+document.addEventListener('click', (event) => {
+    if (!event.target.closest('.guess-input-wrapper')) {
+        hideSuggestions();
+    }
 });
 
 removePunctuationCheckbox.addEventListener('change', () => {
