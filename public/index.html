@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="google-site-verification" content="mGyMTMTchgWR3Bz98RD9ACaNmpuz8U5zopN5UWPsy0c" />
     <link rel="stylesheet" href="/styles.css">
 
@@ -49,7 +49,8 @@
     <div class="container">
         <div class="input-section">
             <div class="search-omnibox-wrapper">
-                <input type="text" id="artist-input" placeholder="Search artist or song..." autocomplete="off">
+                <input type="text" id="artist-input" placeholder="Search artist or song..." autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="go">
+                <button type="button" id="artist-clear-btn" class="search-clear-btn" aria-label="Clear search" style="display: none;">&times;</button>
                 <ul id="search-suggestions" class="search-suggestions" role="listbox" style="display: none;"></ul>
             </div>
             <button id="start-btn">Go</button>
@@ -68,7 +69,7 @@
             <span class="config-divider" aria-hidden="true"></span>
             <label for="remove-adlibs" class="config-toggle">
                 <input type="checkbox" id="remove-adlibs" class="visually-hidden" checked>
-                <span class="config-toggle-text"><span class="config-icon" aria-hidden="true">( )</span>ad-libs</span>
+                <span class="config-toggle-text"><span class="config-icon" aria-hidden="true">()</span>ad-libs</span>
             </label>
         </div>
 
@@ -76,7 +77,23 @@
             <div id="challenge-banner" class="challenge-banner" style="display: none;"></div>
             <p id="display-text" class="text-display"></p>
             <div class="typing-area-container">
-                <textarea id="typing-area" rows="3" placeholder="Start typing here..." disabled></textarea>
+                <input
+                    type="text"
+                    id="typing-area"
+                    name="lyric-typing-input"
+                    inputmode="text"
+                    autocapitalize="none"
+                    autocorrect="off"
+                    autocomplete="off"
+                    spellcheck="false"
+                    enterkeyhint="done"
+                    data-gramm="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                    placeholder="Start typing here..."
+                    disabled
+                >
                 <button id="end-game-btn" style="display: none;">End Game</button>
             </div>
             <p id="wpm-result" class="wpmresult-text"></p>
@@ -130,7 +147,20 @@
 
             <div class="guess-input-wrapper">
                 <div class="guess-input-container">
-                    <input type="text" id="guess-input" placeholder="Type song name or pick suggestion..." autocomplete="off">
+                    <input
+                        type="text"
+                        id="guess-input"
+                        name="song-guess-input"
+                        placeholder="Type song name or pick suggestion..."
+                        autocomplete="off"
+                        autocorrect="off"
+                        autocapitalize="none"
+                        spellcheck="false"
+                        enterkeyhint="go"
+                        data-lpignore="true"
+                        data-1p-ignore="true"
+                        data-form-type="other"
+                    >
                     <button id="guess-submit-btn" class="guess-submit-btn" type="button">Guess</button>
                     <button id="skip-btn" class="skip-btn" type="button">Skip</button>
                 </div>

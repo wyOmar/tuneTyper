@@ -13,6 +13,7 @@ const guessInput = typeof document !== 'undefined' ? document.getElementById('gu
 const guessInputContainer = typeof document !== 'undefined' ? document.querySelector('.guess-input-container') : null;
 const skipBtn = typeof document !== 'undefined' ? document.getElementById('skip-btn') : null;
 const searchSuggestions = typeof document !== 'undefined' ? document.getElementById('search-suggestions') : null;
+const artistClearBtn = typeof document !== 'undefined' ? document.getElementById('artist-clear-btn') : null;
 const endGameBtn = typeof document !== 'undefined' ? document.getElementById('end-game-btn') : null;
 
 // Hint Elements
@@ -88,6 +89,87 @@ let suggestRequestId = 0;
 let sectionOne = "";
 let sectionTwo = "";
 let sectionSelected = "";
+// Mobile / virtual keyboard input state
+let mobileInputOverride = null; // null = auto-detect via pointer/UA; boolean = test override
+
+function isMobileInputMode() {
+    if (mobileInputOverride !== null) return Boolean(mobileInputOverride);
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+        try {
+            if (window.matchMedia('(pointer: coarse)').matches) return true;
+        } catch (_) {}
+    }
+    if (typeof navigator !== 'undefined' && typeof navigator.userAgent === 'string') {
+        if (/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Normalizes smart apostrophes/quotes, non-breaking spaces, newlines, and leading spaces
+function sanitizeRawTypingValue(val) {
+    return String(val || '')
+        .replace(/[\r\n]+/g, '')
+        .replace(/\u00A0/g, ' ')
+        .replace(/[\u2018\u2019\u201A\u201B`]/g, "'")
+        .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+        .replace(/^\s+/, '');
+}
+
+// On mobile virtual keyboards, even with autocapitalize="none", custom IMEs or OS shortcuts
+// (e.g. standalone "I" or stubborn sentence caps after input reset) can emit uppercase letters.
+// Adapting typed letter case to expected word case on mobile prevents false errors without
+// mutating input.value mid-IME-composition.
+function adaptTypedCaseForMobile(sanitizedVal, expectedWord) {
+    if (!isMobileInputMode() || !sanitizedVal) return sanitizedVal;
+    const target = String(expectedWord || '');
+    const lowercaseMode = !(removePunctuationCheckbox && removePunctuationCheckbox.checked);
+    let out = '';
+    for (let i = 0; i < sanitizedVal.length; i++) {
+        const ch = sanitizedVal[i];
+        if (i < target.length && ch.toLowerCase() === target[i].toLowerCase()) {
+            out += target[i];
+        } else if (lowercaseMode) {
+            out += ch.toLowerCase();
+        } else {
+            out += ch;
+        }
+    }
+    return out;
+}
+
+function syncTypingAreaCaseStyle() {
+    if (!typingArea || !typingArea.classList) return;
+    const lowercaseMode = !(removePunctuationCheckbox && removePunctuationCheckbox.checked);
+    typingArea.classList.toggle('lowercase-mode', isMobileInputMode() && lowercaseMode);
+}
+
+function syncArtistClearButton() {
+    if (!artistClearBtn || !artistInput) return;
+    artistClearBtn.style.display = artistInput.value && artistInput.value.length > 0 ? 'inline-flex' : 'none';
+}
+
+function ensureGameVisibleAboveKeyboard() {
+    if (typeof window === 'undefined' || !isMobileInputMode() || !typingArea) return;
+    if (typeof document !== 'undefined' && document.activeElement !== typingArea) return;
+    if (typeof typingArea.getBoundingClientRect !== 'function' || typeof window.scrollBy !== 'function') return;
+
+    const vv = window.visualViewport;
+    const viewportHeight = vv ? vv.height : window.innerHeight;
+    if (!viewportHeight) return;
+
+    const rect = typingArea.getBoundingClientRect();
+    const desiredBottom = rect.bottom + 42; // leave breathing room for live WPM below input
+    if (desiredBottom > viewportHeight) {
+        window.scrollBy({ top: desiredBottom - viewportHeight, behavior: 'smooth' });
+    } else if (displayText && typeof displayText.getBoundingClientRect === 'function') {
+        const displayRect = displayText.getBoundingClientRect();
+        if (displayRect.top < 8) {
+            window.scrollBy({ top: displayRect.top - 12, behavior: 'smooth' });
+        }
+    }
+}
 
 // API Fetch Functions
 async function fetchLyrics(artist, track) {
@@ -570,6 +652,7 @@ function resetGame(preserveChallenge = false) {
         typingArea.value = '';
         typingArea.style.display = 'block';
         typingArea.disabled = true;
+        if (typingArea.classList) typingArea.classList.remove('incorrect');
     }
     if (displayText) displayText.innerHTML = '';
     if (wpmResult) wpmResult.textContent = '';
@@ -617,6 +700,7 @@ function updateDisplayedText() {
         displayText.scrollTop = 0;
     }
 
+    syncTypingAreaCaseStyle();
     updateWordHighlight();
     if (typingArea) {
         typingArea.disabled = false;
@@ -662,19 +746,22 @@ function renderWordProgress(index, typed, showCaret = true) {
     wordElement.innerHTML = html;
 }
 
-// Keep the current word visible inside the (fixed-height) display box
+// Keep the active word on row 1 or row 2 of the 3-row box so row 3 always previews upcoming words
 function scrollCurrentWordIntoView() {
     if (typeof document === 'undefined' || !displayText) return;
     const wordElement = document.getElementById(`word-${currentWordIndex}`);
     if (!wordElement) return;
 
-    const top = wordElement.offsetTop;
-    const bottom = top + wordElement.offsetHeight;
-    const viewTop = displayText.scrollTop;
-    const viewBottom = viewTop + displayText.clientHeight;
+    const padTop = (typeof getComputedStyle === 'function')
+        ? (parseFloat(getComputedStyle(displayText).paddingTop) || 0)
+        : 10;
+    const lineHeight = wordElement.offsetHeight || 26;
+    const relativeTop = wordElement.offsetTop - padTop;
 
-    if (top < viewTop || bottom > viewBottom) {
-        displayText.scrollTop = top - parseFloat(getComputedStyle(displayText).paddingTop);
+    if (relativeTop > lineHeight * 1.35) {
+        displayText.scrollTop = Math.max(0, relativeTop - lineHeight);
+    } else {
+        displayText.scrollTop = 0;
     }
 }
 
@@ -693,9 +780,12 @@ function calculateWPM() {
                 typedCharacters += processedWords[i].length + 1; // completed word + delimiter space
             }
             if (typeof typingArea !== 'undefined' && typingArea && typingArea.value) {
-                const raw = typingArea.value.replace(/^\s+/, '');
                 const currentWord = processedWords[currentWordIndex] || '';
                 const expected = normalizeTextForTyping(currentWord);
+                const raw = adaptTypedCaseForMobile(
+                    sanitizeRawTypingValue(typingArea.value),
+                    expected
+                );
                 for (let i = 0; i < raw.length && i < expected.length; i++) {
                     if (raw[i] === expected[i]) {
                         typedCharacters++;
@@ -1679,31 +1769,35 @@ function showFinalInfo() {
     const albumTitle = (selectedTrack && selectedTrack.album && selectedTrack.album.title) || trackTitle;
     const trackPreview = (selectedTrack && selectedTrack.preview) || '';
 
+    const formatLyricsHtml = (str) => String(str || '').replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>');
+
     let infoHTML = `
-         <div style="display: flex; align-items: flex-start;">
-            <!-- Album Art Section -->
-            <div style="flex-shrink: 0; margin-right: 20px; width: 250px;">
-                <h3 style="margin-bottom: 10px;">${escapeHtml(trackTitle)} <br> <span style="font-size: 16px; color: #aaa; font-weight: normal;">${escapeHtml(artistName)}</span></h3>
-                <img id="album-image" src="${albumCover}" alt="${escapeHtml(albumTitle)}" style="width: 250px; height: 250px; border-radius: 8px; object-fit: cover;">
-                <audio id="song-preview" controls style="width: 100%; margin-top: 12px;">
+        ${challengeOutcomeHTML}
+        <div class="final-results">
+            <div class="final-media-col">
+                <div class="final-track-header">
+                    <h3 class="final-track-title">${escapeHtml(trackTitle)}</h3>
+                    <p class="final-track-artist">${escapeHtml(artistName)}</p>
+                </div>
+                <img id="album-image" class="final-album-art" src="${albumCover}" alt="${escapeHtml(albumTitle)}">
+                <audio id="song-preview" class="final-audio-player" controls>
                     <source src="${trackPreview}" type="audio/mpeg">
                     Your browser does not support the audio element.
                 </audio>
             </div>
 
-            <!-- Lyrics Section & Share Score Underneath -->
-            <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
-                ${challengeOutcomeHTML}
-                <div class="lyrics-box" style="margin-bottom: 10px;">
-                    <p id="display-lyrics" class="display-lyrics">
-                        ${sectionOne.replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>')}
-                        <div class="selectedLyrics">${sectionSelected.replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>')}</div>
-                        ${sectionTwo.replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>')}
-                    </p>
+            <div class="final-content-col">
+                <div class="lyrics-box">
+                    <div id="display-lyrics" class="display-lyrics">
+                        ${formatLyricsHtml(sectionOne)}
+                        <div class="selectedLyrics">${formatLyricsHtml(sectionSelected)}</div>
+                        ${formatLyricsHtml(sectionTwo)}
+                    </div>
                 </div>
                 <div class="share-container">
-                    <button id="share-score-btn" class="share-btn">📋 Share Score</button>
-                    <button id="share-challenge-btn" class="share-btn challenge-link-btn">🔗 Copy Challenge Link</button>
+                    <button id="share-score-btn" class="share-btn" type="button">📋 Share Score</button>
+                    <button id="share-challenge-btn" class="share-btn challenge-link-btn" type="button">Copy Link</button>
+                    <button id="play-again-btn" class="share-btn play-again-btn" type="button">↻ Next Song</button>
                 </div>
             </div>
         </div>
@@ -1712,34 +1806,47 @@ function showFinalInfo() {
     if (songInfo) songInfo.innerHTML = infoHTML;
     if (guessSection) guessSection.style.display = 'none';
 
-    const shareBtn = document.getElementById('share-score-btn');
-    if (shareBtn) {
-        shareBtn.addEventListener('click', copyShareScore);
-    }
+    if (typeof document !== 'undefined') {
+        const shareBtn = document.getElementById('share-score-btn');
+        if (shareBtn) {
+            shareBtn.addEventListener('click', copyShareScore);
+        }
 
-    const challengeBtn = document.getElementById('share-challenge-btn');
-    if (challengeBtn) {
-        challengeBtn.addEventListener('click', copyChallengeLink);
-    }
+        const challengeBtn = document.getElementById('share-challenge-btn');
+        if (challengeBtn) {
+            challengeBtn.addEventListener('click', copyChallengeLink);
+        }
 
-    const audioElement = document.getElementById('song-preview');
-    if (audioElement) {
-        audioElement.volume = 0.25;
-    }
+        const playAgainBtn = document.getElementById('play-again-btn');
+        if (playAgainBtn) {
+            playAgainBtn.addEventListener('click', () => {
+                if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+                if (startBtn) startBtn.click();
+            });
+        }
 
-    // Bring the highlighted (typed) lyrics into view inside the lyrics box
-    scrollToSelectedLyrics();
-    // The album art changes the lyrics box width once loaded, which reflows the text, so re-align then
-    const albumImage = document.getElementById('album-image');
-    if (albumImage && !albumImage.complete) {
-        albumImage.addEventListener('load', scrollToSelectedLyrics, { once: true });
+        const audioElement = document.getElementById('song-preview');
+        if (audioElement) {
+            audioElement.volume = 0.25;
+        }
+
+        // Bring the highlighted (typed) lyrics into view inside the lyrics box
+        scrollToSelectedLyrics();
+        // The album art changes the lyrics box width once loaded, which reflows the text, so re-align then
+        const albumImage = document.getElementById('album-image');
+        if (albumImage && !albumImage.complete && typeof albumImage.addEventListener === 'function') {
+            albumImage.addEventListener('load', scrollToSelectedLyrics, { once: true });
+        }
     }
 }
 
 function scrollToSelectedLyrics() {
+    if (!songInfo || typeof songInfo.querySelector !== 'function') return;
     const lyricsBox = songInfo.querySelector('.lyrics-box');
     const selected = lyricsBox && lyricsBox.querySelector('.selectedLyrics');
-    if (!selected) return;
+    if (!selected || typeof lyricsBox.scrollTo !== 'function') return;
 
     // Centre the selection vertically (or align its top if it's taller than the box)
     const offset = Math.max(0, (lyricsBox.clientHeight - selected.offsetHeight) / 2);
@@ -1791,13 +1898,18 @@ function handleTypingInput() {
 
     if (!typingArea) return;
 
-    // Ignore leading whitespace (e.g. a stray space at the start of a word)
-    const rawTyped = typingArea.value.replace(/^\s+/, '');
-    if (rawTyped !== typingArea.value) typingArea.value = rawTyped;
+    // Strip leading whitespace or stray newlines without mutating mid-word IME composition
+    const rawInputValue = String(typingArea.value || '');
+    const strippedLeading = rawInputValue.replace(/[\r\n]+/g, '').replace(/^[\s\u00A0]+/, '');
+    if (strippedLeading !== rawInputValue) {
+        typingArea.value = strippedLeading;
+    }
 
     const currentWord = processedWords[currentWordIndex];
-    const normalizedTypedText = normalizeTextForTyping(rawTyped); // trimmed
     const normalizedCurrentWord = normalizeTextForTyping(currentWord);
+    const sanitizedTyped = sanitizeRawTypingValue(strippedLeading);
+    const rawTyped = adaptTypedCaseForMobile(sanitizedTyped, normalizedCurrentWord);
+    const normalizedTypedText = normalizeTextForTyping(rawTyped); // trimmed
     const endsWithSpace = /\s$/.test(rawTyped);
     const isLastWord = currentWordIndex === processedWords.length - 1;
 
@@ -1850,13 +1962,30 @@ function handleTypingInput() {
     } else {
         if (typingArea.classList) typingArea.classList.remove('incorrect');
     }
-
-    // wpmResult.textContent = `${calculateWPM()}`;
-    // //CurrentWPM
 }
 
 if (typingArea) {
     typingArea.addEventListener('input', handleTypingInput);
+    typingArea.addEventListener('focus', () => {
+        syncTypingAreaCaseStyle();
+        setTimeout(ensureGameVisibleAboveKeyboard, 180);
+    });
+}
+
+if (displayText) {
+    // Tapping the lyrics box on mobile focuses the typing input (unless selecting text)
+    displayText.addEventListener('click', () => {
+        if (!typingArea || typingArea.disabled || typingArea.style.display === 'none') return;
+        if (typeof window !== 'undefined' && typeof window.getSelection === 'function') {
+            const sel = window.getSelection();
+            if (sel && String(sel).length > 0) return;
+        }
+        typingArea.focus();
+    });
+}
+
+if (typeof window !== 'undefined' && window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
+    window.visualViewport.addEventListener('resize', ensureGameVisibleAboveKeyboard);
 }
 
 // Backspace safety net: if the current word is typed correctly but has extra characters after it
@@ -1868,9 +1997,12 @@ let backspaceLockUntil = 0;
 
 if (typingArea) {
     typingArea.addEventListener('keydown', (event) => {
-        // Only space moves to the next word, so don't let Enter insert a newline in the typing box
+        // Only space moves to the next word; on mobile "Done" dismisses the virtual keyboard cleanly
         if (event.key === 'Enter') {
             event.preventDefault();
+            if (isMobileInputMode() && typeof typingArea.blur === 'function') {
+                typingArea.blur();
+            }
             return;
         }
         if (['Control', 'Alt', 'Meta', 'Shift'].includes(event.key)) return;
@@ -1884,8 +2016,9 @@ if (typingArea) {
         const caretAtEnd = typingArea.selectionStart === value.length && typingArea.selectionEnd === value.length;
         if (word === undefined || !caretAtEnd) return; // let normal editing happen for selections etc.
 
+        const expectedWord = normalizeTextForTyping(word);
         const now = performance.now();
-        const typed = normalizeTextForTyping(value);
+        const typed = normalizeTextForTyping(adaptTypedCaseForMobile(sanitizeRawTypingValue(value), expectedWord));
         const hasExtrasAfterCorrectWord = typed.length > word.length && typed.startsWith(word);
 
         // Already stopped at the correct word during this burst: hold the line
@@ -1903,9 +2036,14 @@ if (typingArea) {
             typingArea.value = word;
             typingArea.dispatchEvent(new Event('input'));
             backspaceLockUntil = now + BACKSPACE_BURST_MS;
-        } else if (normalizeTextForTyping(value.slice(0, -1)) === word) {
-            // This plain backspace removes the last extra character; lock further backspaces in the burst
-            backspaceLockUntil = now + BACKSPACE_BURST_MS;
+        } else {
+            const slicedTyped = normalizeTextForTyping(
+                adaptTypedCaseForMobile(sanitizeRawTypingValue(value.slice(0, -1)), expectedWord)
+            );
+            if (slicedTyped === word) {
+                // This plain backspace removes the last extra character; lock further backspaces in the burst
+                backspaceLockUntil = now + BACKSPACE_BURST_MS;
+            }
         }
     });
 }
@@ -1979,6 +2117,7 @@ if (typeof document !== 'undefined') {
 
 if (removePunctuationCheckbox) {
     removePunctuationCheckbox.addEventListener('change', () => {
+        syncTypingAreaCaseStyle();
         if (!testStarted) updateDisplayedText();
     });
 }
@@ -2201,6 +2340,7 @@ async function selectOmniboxItem(item) {
 
     if (item.type === 'artist') {
         if (artistInput) artistInput.value = item.name;
+        syncArtistClearButton();
         syncShelfVisibility(item.name);
         if (startBtn) startBtn.disabled = true;
         resetGame();
@@ -2215,6 +2355,7 @@ async function selectOmniboxItem(item) {
     } else {
         const displayLabel = `${item.artist} - ${item.title}`;
         if (artistInput) artistInput.value = displayLabel;
+        syncArtistClearButton();
         syncShelfVisibility(item.artist, item.title);
         if (startBtn) startBtn.disabled = true;
         resetGame();
@@ -2431,6 +2572,7 @@ if (startBtn) {
             } else {
                 const targetArtist = intent.artist || inputValue;
                 if (artistInput) artistInput.value = targetArtist;
+                syncArtistClearButton();
                 syncShelfVisibility(targetArtist);
                 await handleArtistSearch(targetArtist, intent.artistId || null);
             }
@@ -2443,13 +2585,27 @@ if (startBtn) {
     });
 }
 
+if (artistClearBtn) {
+    artistClearBtn.addEventListener('click', (event) => {
+        event.preventDefault();
+        if (artistInput) {
+            artistInput.value = '';
+            syncArtistClearButton();
+            hideSearchSuggestions();
+            artistInput.focus();
+        }
+    });
+}
+
 if (artistInput) {
     artistInput.addEventListener('input', () => {
+        syncArtistClearButton();
         cancelInputTyping(false);
         triggerOmniboxAutocomplete(artistInput.value);
     });
 
     artistInput.addEventListener('focus', () => {
+        syncArtistClearButton();
         cancelInputTyping(true);
         if (artistInput.value && artistInput.value.trim()) {
             triggerOmniboxAutocomplete(artistInput.value);
@@ -2567,6 +2723,7 @@ async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = nu
     const searchQuery = artistName ? `${artistName} ${trackTitle}` : trackTitle;
     cancelInputTyping(false);
     if (artistInput) artistInput.value = artistName ? `${artistName} - ${trackTitle}` : trackTitle;
+    syncArtistClearButton();
 
     updateChallengeBanner();
 
@@ -2671,6 +2828,7 @@ async function parseAndLoadUrlParameters() {
             return true;
         } else if (parsed.artist) {
             if (artistInput) artistInput.value = parsed.artist;
+            syncArtistClearButton();
             await handleArtistSearch(parsed.artist);
             return true;
         }
@@ -2679,6 +2837,7 @@ async function parseAndLoadUrlParameters() {
     const routeArtist = getArtistFromLocationPath(window.location.pathname);
     if (routeArtist) {
         if (artistInput) artistInput.value = routeArtist;
+        syncArtistClearButton();
         try {
             await handleArtistSearch(routeArtist);
             return true;
@@ -2745,12 +2904,14 @@ if (typeof window !== 'undefined') {
         if (titleElement) titleElement.textContent = '';
         typeNavbarTitle();
         bindArtistTrackCards();
+        syncArtistClearButton();
+        syncTypingAreaCaseStyle();
 
         const loadedFromUrl = await parseAndLoadUrlParameters();
         if (!loadedFromUrl) {
-            if (artistInput) artistInput.focus();
+            if (artistInput && !isMobileInputMode()) artistInput.focus();
             loadDefaultPlaylist();
-        } else if (typingArea && !typingArea.disabled) {
+        } else if (!isMobileInputMode() && typingArea && !typingArea.disabled) {
             typingArea.focus();
         }
     });
@@ -3009,6 +3170,11 @@ if (typeof module !== 'undefined' && module.exports) {
         handleSongSearch,
         ensureSelectedArtistCandidates,
         playSnippet,
+        showFinalInfo,
+        isMobileInputMode,
+        sanitizeRawTypingValue,
+        adaptTypedCaseForMobile,
+        syncArtistClearButton,
         fakeTypeValue,
         getCommonPrefixLength,
         cancelInputTyping,
@@ -3051,7 +3217,11 @@ if (typeof module !== 'undefined' && module.exports) {
             guessSuggestions,
             removePunctuationCheckbox,
             includeNumbersCheckbox,
-            removeAdlibsCheckbox
+            removeAdlibsCheckbox,
+            mobileInputOverride,
+            sectionOne,
+            sectionSelected,
+            sectionTwo
         }),
         _setState: (state) => {
             if ('totalKeystrokes' in state) totalKeystrokes = state.totalKeystrokes;
@@ -3080,6 +3250,10 @@ if (typeof module !== 'undefined' && module.exports) {
             if ('candidateSongs' in state) candidateSongs = state.candidateSongs;
             if ('artistCandidateCache' in state) artistCandidateCache = state.artistCandidateCache;
             if ('trackExtraDetails' in state) trackExtraDetails = state.trackExtraDetails;
+            if ('mobileInputOverride' in state) mobileInputOverride = state.mobileInputOverride;
+            if ('sectionOne' in state) sectionOne = state.sectionOne;
+            if ('sectionSelected' in state) sectionSelected = state.sectionSelected;
+            if ('sectionTwo' in state) sectionTwo = state.sectionTwo;
         }
     };
 }
