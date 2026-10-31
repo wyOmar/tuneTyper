@@ -223,6 +223,11 @@ async function fetchTopTracks(artistId, limit = 50) {
 
 async function loadDefaultPlaylist() {
     currentGameMode = 'artist';
+    syncShelfVisibility('');
+    if (typeof document !== 'undefined') {
+        const shelf = document.getElementById('artist-tracks-shelf');
+        if (shelf) shelf.style.display = 'none';
+    }
     try {
         const response = await fetch('/default');
         if (!response.ok) throw new Error('Failed to fetch playlist data.');
@@ -2302,8 +2307,83 @@ function syncShelfVisibility(targetArtistName, activeTrackTitle = '') {
     const initialName = (typeof window !== 'undefined' && window.__INITIAL_ARTIST__ && window.__INITIAL_ARTIST__.name)
         ? normOmnibox(window.__INITIAL_ARTIST__.name)
         : '';
-    const matchesInitial = Boolean(targetArtistNorm && initialName && targetArtistNorm === initialName);
-    shelf.style.display = matchesInitial ? '' : 'none';
+    const shelfName = (shelf.getAttribute && shelf.getAttribute('data-artist-name'))
+        ? normOmnibox(shelf.getAttribute('data-artist-name'))
+        : initialName;
+    const matchesTarget = Boolean(targetArtistNorm && shelfName && targetArtistNorm === shelfName);
+    shelf.style.display = matchesTarget ? '' : 'none';
+}
+
+function renderArtistPopularTracksShelf(artistName, tracks) {
+    if (typeof document === 'undefined') return;
+    const slot = document.getElementById('artist-tracks-slot');
+    if (!slot) return;
+
+    if (!artistName || !Array.isArray(tracks) || tracks.length === 0) {
+        slot.innerHTML = '';
+        return;
+    }
+
+    const seen = new Set();
+    const candidateTracks = [];
+
+    for (const track of tracks) {
+        if (!track || !track.title) continue;
+        if (isUnwantedTrack(track)) continue;
+
+        const cleanTitle = (track.title_short || track.title || '').trim();
+        if (!cleanTitle) continue;
+        const normKey = stripSuggestionPunctuation(cleanTitle) || cleanTitle.toLowerCase();
+        if (seen.has(normKey)) continue;
+        seen.add(normKey);
+
+        candidateTracks.push(track);
+        if (candidateTracks.length >= 5) break;
+    }
+
+    if (candidateTracks.length === 0) {
+        slot.innerHTML = '';
+        return;
+    }
+
+    const safeName = escapeHtml(artistName);
+    const cardsHtml = candidateTracks.map(track => {
+        const title = track.title_short || track.title;
+        const safeTitle = escapeHtml(title);
+        const albumTitle = (track.album && track.album.title) ? track.album.title : title;
+        const safeAlbum = escapeHtml(albumTitle);
+        const cover = (track.album && (track.album.cover_medium || track.album.cover_small)) || '';
+        const safeCover = escapeHtml(cover);
+        const trackArtist = (track.artist && track.artist.name) ? track.artist.name : artistName;
+        const safeArtist = escapeHtml(trackArtist);
+        const safeYear = track.release_date ? escapeHtml(track.release_date.slice(0, 4)) : '';
+        const metaText = safeYear ? `${safeAlbum} · ${safeYear}` : safeAlbum;
+
+        return [
+            `        <button type="button" class="artist-track-card" data-artist="${safeArtist}" data-track="${safeTitle}">`,
+            `            <span class="track-card-cover-wrap">`,
+            `                <img src="${safeCover}" alt="${safeTitle} — ${safeAlbum} cover" loading="lazy" width="250" height="250" class="track-card-img">`,
+            `                <span class="track-card-overlay" aria-hidden="true">▶ Type</span>`,
+            `            </span>`,
+            `            <span class="track-card-title">${safeTitle}</span>`,
+            `            <span class="track-card-meta">${metaText}</span>`,
+            `        </button>`
+        ].join('\n');
+    }).join('\n');
+
+    slot.innerHTML = [
+        `<section id="artist-tracks-shelf" class="container artist-tracks-container" data-artist-name="${safeName}" aria-label="${safeName} popular tracks">`,
+        `    <div class="artist-shelf-header">`,
+        `        <h2 class="artist-shelf-title">${safeName} <span class="artist-shelf-sub">— Popular Tracks</span></h2>`,
+        `        <span class="artist-genre-badge">popular</span>`,
+        `    </div>`,
+        `    <div class="artist-tracks-grid">`,
+        cardsHtml,
+        `    </div>`,
+        `</section>`
+    ].join('\n');
+
+    bindArtistTrackCards();
 }
 
 function hideSearchSuggestions() {
@@ -2591,6 +2671,7 @@ if (artistClearBtn) {
         if (artistInput) {
             artistInput.value = '';
             syncArtistClearButton();
+            syncShelfVisibility('');
             hideSearchSuggestions();
             artistInput.focus();
         }
@@ -2854,6 +2935,8 @@ function bindArtistTrackCards(typingSpeed = 22) {
     if (typeof document === 'undefined') return;
     const cards = document.querySelectorAll('.artist-track-card');
     cards.forEach((card) => {
+        if (card._boundClick) return;
+        card._boundClick = true;
         card.addEventListener('click', async () => {
             const artist = card.getAttribute('data-artist') || '';
             const track = card.getAttribute('data-track') || '';
@@ -2936,8 +3019,10 @@ async function handleArtistSearch(artistName, knownArtistId = null) {
         previousArtist = artistName;
     }
 
+    renderArtistPopularTracksShelf(artistName, artistTracks);
     await tryFetchLyricsFromTracks(artistTracks);
     ensureSelectedArtistCandidates();
+    syncShelfVisibility(artistName, selectedTrack ? selectedTrack.title : '');
 }
 
 async function handleSongSearch(songName, preferredArtist = '', preferredTitle = '') {
@@ -3166,6 +3251,7 @@ if (typeof module !== 'undefined' && module.exports) {
         trackDetailsCache,
         isPreviewUrlFresh,
         fetchTrackDetails,
+        loadDefaultPlaylist,
         handleArtistSearch,
         handleSongSearch,
         ensureSelectedArtistCandidates,
@@ -3179,6 +3265,7 @@ if (typeof module !== 'undefined' && module.exports) {
         getCommonPrefixLength,
         cancelInputTyping,
         bindArtistTrackCards,
+        renderArtistPopularTracksShelf,
         syncShelfVisibility,
         showToast,
         isUnwantedTrack,

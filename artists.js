@@ -1272,7 +1272,7 @@ function buildArtistTracksShelfHtml(artist) {
     }).join("\n");
 
     return [
-        `<section id="artist-tracks-shelf" class="container artist-tracks-container" data-artist-slug="${escapeHtml(artist.slug)}" aria-label="${safeName} popular tracks">`,
+        `<section id="artist-tracks-shelf" class="container artist-tracks-container" data-artist-slug="${escapeHtml(artist.slug)}" data-artist-name="${safeName}" aria-label="${safeName} popular tracks">`,
         `    <div class="artist-shelf-header">`,
         `        <h1 class="artist-shelf-title">${safeName} <span class="artist-shelf-sub">— Popular Tracks</span></h1>`,
         `        <span class="artist-genre-badge">${safeGenre}</span>`,
