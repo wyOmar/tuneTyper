@@ -273,10 +273,9 @@ async function loadCuratedPlaylist(playlistId = currentPlaylistId) {
             const trackArtist = randomTrack.artist.name;
             const trackTitle = randomTrack.title;
 
-            console.log(`Trying Song: ${trackTitle} by ${trackArtist}`);
-
-            try {
-                lyrics = await fetchLyrics(trackArtist, trackTitle);
+            // Use pre-warmed lyrics immediately if already attached to track (0 network calls, 0 OVH dependency)
+            if (typeof randomTrack.lyrics === 'string' && randomTrack.lyrics.trim()) {
+                lyrics = randomTrack.lyrics;
                 await fakeTypePlaceholder(artistInput, `${trackArtist}`, 25);
                 cachedSongLyrics[`${trackArtist}-${trackTitle}`] = lyrics;
 
@@ -286,10 +285,25 @@ async function loadCuratedPlaylist(playlistId = currentPlaylistId) {
                 typeSection = extractRandomSection(lyrics);
                 updateDisplayedText();
                 endGameBtn.style.display = 'inline-block';
+                console.log(`Loaded pre-warmed lyrics for: ${trackTitle} by ${trackArtist}`);
+            } else {
+                console.log(`Trying Song: ${trackTitle} by ${trackArtist}`);
+                try {
+                    lyrics = await fetchLyrics(trackArtist, trackTitle);
+                    await fakeTypePlaceholder(artistInput, `${trackArtist}`, 25);
+                    cachedSongLyrics[`${trackArtist}-${trackTitle}`] = lyrics;
 
-                console.log(`Loaded lyrics for: ${trackTitle} by ${trackArtist}`);
-            } catch (error) {
-                console.warn(`Lyrics not found for: ${trackTitle} by ${trackArtist}. Trying another song...`);
+                    selectedTrack = randomTrack;
+                    hydrateSelectedTrackPreview();
+                    ensureSelectedArtistCandidates();
+                    typeSection = extractRandomSection(lyrics);
+                    updateDisplayedText();
+                    endGameBtn.style.display = 'inline-block';
+
+                    console.log(`Loaded lyrics for: ${trackTitle} by ${trackArtist}`);
+                } catch (error) {
+                    console.warn(`Lyrics not found for: ${trackTitle} by ${trackArtist}. Trying another song...`);
+                }
             }
         }
 

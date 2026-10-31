@@ -177,7 +177,7 @@ async function warmSinglePlaylist(playlistId, options = {}) {
     await mapWithConcurrency(sanitizedTracks, concurrency, async (track, idx) => {
         const existing = existingEntries[idx];
         if (existing && typeof existing.lyrics === 'string' && existing.lyrics.trim()) {
-            playableTracks[idx] = track;
+            playableTracks[idx] = { ...track, lyrics: existing.lyrics };
             return;
         }
         if (existing && existing.notFound && !options.forceRecheckMissing) {
@@ -188,7 +188,7 @@ async function warmSinglePlaylist(playlistId, options = {}) {
             const result = await fetchAndCacheLyrics(track.artist.name, track.title, cache);
             if (result.lyrics) {
                 if (!result.cached) newlyFetchedLyrics++;
-                playableTracks[idx] = track;
+                playableTracks[idx] = { ...track, lyrics: result.lyrics };
             }
         } catch (err) {
             console.warn(`Warm skip for "${track.title}" by ${track.artist.name}:`, err.message);
@@ -392,7 +392,7 @@ app.get('/suggest', async (req, res) => {
 
     try {
         let cacheHit = true;
-        let payload = await defaultCache.get(key);
+        let payload = await defaultCache.get(key, { skipRedis: true });
 
         if (!payload) {
             cacheHit = false;
@@ -442,7 +442,7 @@ app.get('/suggest', async (req, res) => {
                 }
 
                 const result = { artists, tracks };
-                await defaultCache.set(key, result, TTL.SUGGEST_SECONDS);
+                await defaultCache.set(key, result, TTL.SUGGEST_SECONDS, { skipRedis: true });
                 return result;
             });
         }
