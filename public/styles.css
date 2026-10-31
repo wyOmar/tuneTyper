@@ -780,6 +780,74 @@ h1 {
     color: #4caf50;
 }
 
+/* Challenge Banner & Outcomes */
+.challenge-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: #1c2b1e;
+    border: 1px solid #4caf50;
+    border-radius: 6px;
+    padding: 10px 16px;
+    margin-bottom: 16px;
+    font-family: monospace;
+    font-size: 14px;
+    color: #e0e0e0;
+    text-align: center;
+}
+
+.challenge-banner .challenge-icon {
+    font-size: 16px;
+}
+
+.challenge-banner strong {
+    color: #81c784;
+}
+
+.challenge-outcome {
+    margin-bottom: 14px;
+    padding: 12px 16px;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 14px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-align: left;
+}
+
+.challenge-outcome.won {
+    background: #1c2b1e;
+    border: 1px solid #4caf50;
+    color: #81c784;
+}
+
+.challenge-outcome.lost {
+    background: #331d20;
+    border: 1px solid #dc3545;
+    color: #ff8585;
+}
+
+.challenge-outcome.tied {
+    background: #332d1e;
+    border: 1px solid #ffb300;
+    color: #ffe082;
+}
+
+.challenge-link-btn {
+    background-color: #2c2c2c;
+    color: #ddd;
+    border: 1px solid #555;
+}
+
+.challenge-link-btn:hover {
+    background-color: #3d3d3d;
+    border-color: #777;
+    color: #fff;
+}
+
 .footer {
     position: fixed;
     bottom: 0;

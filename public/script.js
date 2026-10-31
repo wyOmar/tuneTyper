@@ -27,6 +27,7 @@ const snippetLabel = typeof document !== 'undefined' ? document.getElementById('
 const snippetBar = typeof document !== 'undefined' ? document.getElementById('snippet-bar') : null;
 const guessSubmitBtn = typeof document !== 'undefined' ? document.getElementById('guess-submit-btn') : null;
 const guessSuggestions = typeof document !== 'undefined' ? document.getElementById('guess-suggestions') : null;
+const challengeBanner = typeof document !== 'undefined' ? document.getElementById('challenge-banner') : null;
 
 // Variables
 let typeSection = "";
@@ -41,6 +42,12 @@ let previousArtist = "";
 let artistTracks = [];
 let cachedSongLyrics = {};
 let wpmInterval;
+// Deep link & Challenge variables
+let isSharedGame = false;
+let challengerWPM = null;
+let challengerAcc = null;
+let challengeStartIndex = null;
+let currentStartIndex = 0;
 // Share Score & Accuracy variables
 let totalKeystrokes = 0;
 let errorKeystrokes = 0;
@@ -156,9 +163,42 @@ async function loadDefaultPlaylist() {
     }
 }
 // Utility Functions
-function extractRandomSection(text, minLength = 150, maxLength = 300) {
+function extractRandomSection(text, minLength = 150, maxLength = 300, targetStartIndex = null) {
     const lines = text.split(/\n/);
     if (lines.length === 0) return '';
+
+    // If a deterministic start index is specified (e.g. from a shared challenge deep link)
+    if (targetStartIndex !== null && targetStartIndex !== undefined && !isNaN(targetStartIndex)) {
+        const parsedStart = parseInt(targetStartIndex, 10);
+        if (parsedStart >= 0 && parsedStart < lines.length) {
+            let selectedText = '';
+            let totalLength = 0;
+            let startIndex = parsedStart;
+            let index = startIndex;
+            while (totalLength < minLength && index < lines.length) {
+                const line = lines[index];
+                selectedText += (selectedText ? '\n' : '') + line;
+                totalLength = selectedText.length;
+                index++;
+            }
+            if (selectedText.length > 0) {
+                if (totalLength > maxLength) {
+                    selectedText = selectedText.slice(0, maxLength);
+                    const lastSpace = selectedText.lastIndexOf(' ');
+                    const lastSentenceEnd = selectedText.lastIndexOf('.');
+                    const cutIndex = Math.max(lastSentenceEnd, lastSpace);
+                    if (cutIndex > 0) {
+                        selectedText = selectedText.slice(0, cutIndex).trim();
+                    }
+                }
+                sectionOne = lines.slice(0, startIndex).join('\n');
+                sectionTwo = lines.slice(startIndex).join('\n').slice(selectedText.length).trim();
+                sectionSelected = selectedText.trim();
+                currentStartIndex = startIndex;
+                return selectedText.trim();
+            }
+        }
+    }
 
     for (let attempt = 0; attempt < 5; attempt++) {
         let selectedText = '';
@@ -188,6 +228,7 @@ function extractRandomSection(text, minLength = 150, maxLength = 300) {
             // Start sectionTwo right after the (possibly truncated) selection so no text is lost
             sectionTwo = lines.slice(startIndex).join('\n').slice(selectedText.length).trim();
             sectionSelected = selectedText.trim();
+            currentStartIndex = startIndex;
             // console.log("Selected Section:", selectedText);
             // console.log("Section One (Before):", sectionOne);
             // console.log("Section Two (After):", sectionTwo);
@@ -200,6 +241,7 @@ function extractRandomSection(text, minLength = 150, maxLength = 300) {
     sectionOne = '';
     sectionTwo = '';
     sectionSelected = lines.join('\n').slice(0, maxLength).trim();
+    currentStartIndex = 0;
     return sectionSelected;
 }
 
@@ -254,7 +296,7 @@ async function fakeTypePlaceholder(element, text, speed = 100) {
 }
 
 // Game Functions
-function resetGame() {
+function resetGame(preserveChallenge = false) {
     currentWordIndex = 0;
     startTime = null;
     endTime = null;
@@ -276,6 +318,17 @@ function resetGame() {
     stopSnippet();
     hideSuggestions();
 
+    if (!preserveChallenge) {
+        isSharedGame = false;
+        challengerWPM = null;
+        challengerAcc = null;
+        challengeStartIndex = null;
+        if (challengeBanner) {
+            challengeBanner.style.display = 'none';
+            challengeBanner.innerHTML = '';
+        }
+    }
+
     if (typingArea) {
         typingArea.value = '';
         typingArea.style.display = 'block';
@@ -293,6 +346,25 @@ function resetGame() {
     if (includeNumbersCheckbox) includeNumbersCheckbox.disabled = false;
     if (searchTypeDropdown) searchTypeDropdown.disabled = false;
     if (endGameBtn) endGameBtn.style.display = 'none';
+}
+
+function updateChallengeBanner() {
+    if (!challengeBanner) return;
+    if (isSharedGame && challengerWPM !== null && challengerWPM !== undefined) {
+        const trackName = selectedTrack ? selectedTrack.title : '';
+        const artistName = (selectedTrack && selectedTrack.artist) ? selectedTrack.artist.name : '';
+        const songPart = trackName ? ` on "<strong>${escapeHtml(trackName)}</strong>"` : '';
+        const artistPart = artistName ? ` by <strong>${escapeHtml(artistName)}</strong>` : '';
+        const accPart = (challengerAcc !== null && challengerAcc !== undefined) ? ` (${challengerAcc}% Acc)` : '';
+        challengeBanner.innerHTML = `
+            <span class="challenge-icon">🎯</span>
+            <span class="challenge-text">Challenge: Beat <strong>${challengerWPM} WPM</strong>${accPart}${songPart}${artistPart}</span>
+        `;
+        challengeBanner.style.display = 'flex';
+    } else {
+        challengeBanner.style.display = 'none';
+        challengeBanner.innerHTML = '';
+    }
 }
 
 function updateDisplayedText() {
@@ -814,9 +886,23 @@ function removeParentheses(str) {
     return str.replace(/\(.*?\)/g, '').trimEnd() + ' ';
 }
 
+function generateChallengeUrl(trackTitle, artistName, wpm, acc, startIndex) {
+    const origin = (typeof window !== 'undefined' && window.location && window.location.origin && window.location.origin !== 'null' && !window.location.origin.startsWith('file:'))
+        ? window.location.origin
+        : 'https://type.vincentchan.uk';
+    const pathname = (typeof window !== 'undefined' && window.location && window.location.pathname) ? window.location.pathname : '/';
+    const params = new URLSearchParams();
+    if (artistName) params.set('artist', artistName);
+    if (trackTitle) params.set('track', trackTitle);
+    if (wpm !== undefined && wpm !== null && !isNaN(wpm)) params.set('wpm', wpm);
+    if (acc !== undefined && acc !== null && !isNaN(acc)) params.set('acc', acc);
+    if (startIndex !== undefined && startIndex !== null && !isNaN(startIndex) && startIndex >= 0) params.set('start', startIndex);
+    return `${origin}${pathname}?${params.toString()}`;
+}
+
 function generateShareText() {
     const trackTitle = selectedTrack ? selectedTrack.title : 'Unknown';
-    const artistName = selectedTrack && selectedTrack.artist ? selectedTrack.artist.name : 'Unknown';
+    const artistName = (selectedTrack && selectedTrack.artist) ? selectedTrack.artist.name : 'Unknown';
     const acc = finalAccuracy ?? calculateAccuracy();
     const wpm = finalWPM ?? calculateWPM();
     const searchType = searchTypeDropdown ? searchTypeDropdown.value : 'artist';
@@ -824,7 +910,7 @@ function generateShareText() {
     let guessLine = '';
     let emojiGrid = '';
 
-    if (searchType === 'song') {
+    if (isSharedGame || searchType === 'song') {
         guessLine = '⚡ Direct Song Practice';
         emojiGrid = '🟩🟩🟩🟩🟩';
     } else if (gaveUp) {
@@ -845,8 +931,8 @@ function generateShareText() {
         emojiGrid = blocks.join('');
     }
 
-    const shareUrl = 'https://type.vincentchan.uk';
-    const invite = (gaveUp || searchType === 'song') ? shareUrl : `Can you beat me? ${shareUrl}`;
+    const shareUrl = generateChallengeUrl(trackTitle, artistName, wpm, acc, currentStartIndex);
+    const invite = (gaveUp || isSharedGame || searchType === 'song') ? `Beat my score: ${shareUrl}` : `Can you beat me? ${shareUrl}`;
 
     return [
         '🎵 TuneTyper',
@@ -907,6 +993,61 @@ async function copyShareScore() {
     }
 }
 
+async function copyChallengeLink() {
+    const trackTitle = selectedTrack ? selectedTrack.title : '';
+    const artistName = (selectedTrack && selectedTrack.artist) ? selectedTrack.artist.name : '';
+    const wpm = finalWPM ?? calculateWPM();
+    const acc = finalAccuracy ?? calculateAccuracy();
+    const url = generateChallengeUrl(trackTitle, artistName, wpm, acc, currentStartIndex);
+
+    let copied = false;
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+            await navigator.clipboard.writeText(url);
+            copied = true;
+        } catch (err) {
+            console.warn('navigator.clipboard.writeText failed, falling back:', err);
+        }
+    }
+
+    if (!copied) {
+        try {
+            const textarea = document.createElement('textarea');
+            textarea.value = url;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            textarea.style.top = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            copied = document.execCommand('copy');
+            document.body.removeChild(textarea);
+        } catch (err) {
+            console.error('Fallback copy failed:', err);
+        }
+    }
+
+    const toast = document.getElementById('share-toast');
+    if (toast) {
+        toast.style.display = 'block';
+        toast.textContent = copied ? 'Challenge link copied!' : 'Failed to copy';
+        setTimeout(() => {
+            toast.style.display = 'none';
+        }, 2500);
+    }
+
+    const challengeBtn = document.getElementById('share-challenge-btn');
+    if (challengeBtn && copied) {
+        const originalText = challengeBtn.textContent;
+        challengeBtn.textContent = '✓ Copied!';
+        setTimeout(() => {
+            challengeBtn.textContent = originalText;
+        }, 2000);
+    }
+}
+
 function showFinalInfo() {
     stopSnippet();
     hideSuggestions();
@@ -916,20 +1057,39 @@ function showFinalInfo() {
         finalAccuracy = calculateAccuracy();
     }
 
+    let challengeOutcomeHTML = '';
+    if (challengerWPM !== null && challengerWPM !== undefined) {
+        const diff = finalWPM - challengerWPM;
+        if (diff > 0) {
+            challengeOutcomeHTML = `<div class="challenge-outcome won">🏆 Challenge Won! You beat ${challengerWPM} WPM by +${diff} WPM (${finalWPM} vs ${challengerWPM} WPM)!</div>`;
+        } else if (diff < 0) {
+            challengeOutcomeHTML = `<div class="challenge-outcome lost">🥈 Challenge Lost! You were ${Math.abs(diff)} WPM short of the target (${finalWPM} vs ${challengerWPM} WPM).</div>`;
+        } else {
+            challengeOutcomeHTML = `<div class="challenge-outcome tied">🤝 Challenge Tied! You matched the target of ${finalWPM} WPM!</div>`;
+        }
+    }
+
+    const trackTitle = selectedTrack ? selectedTrack.title : 'Unknown';
+    const artistName = (selectedTrack && selectedTrack.artist) ? selectedTrack.artist.name : 'Unknown';
+    const albumCover = (selectedTrack && selectedTrack.album && selectedTrack.album.cover_medium) || '/favicon/apple-touch-icon.png';
+    const albumTitle = (selectedTrack && selectedTrack.album && selectedTrack.album.title) || trackTitle;
+    const trackPreview = (selectedTrack && selectedTrack.preview) || '';
+
     let infoHTML = `
          <div style="display: flex; align-items: flex-start;">
             <!-- Album Art Section -->
             <div style="flex-shrink: 0; margin-right: 20px; width: 250px;">
-                <h3 style="margin-bottom: 10px;">${selectedTrack.title} <br> <span style="font-size: 16px; color: #aaa; font-weight: normal;">${selectedTrack.artist.name}</span></h3>
-                <img id="album-image" src="${selectedTrack.album.cover_medium}" alt="${selectedTrack.album.title}" style="width: 250px; height: 250px; border-radius: 8px; object-fit: cover;">
+                <h3 style="margin-bottom: 10px;">${escapeHtml(trackTitle)} <br> <span style="font-size: 16px; color: #aaa; font-weight: normal;">${escapeHtml(artistName)}</span></h3>
+                <img id="album-image" src="${albumCover}" alt="${escapeHtml(albumTitle)}" style="width: 250px; height: 250px; border-radius: 8px; object-fit: cover;">
                 <audio id="song-preview" controls style="width: 100%; margin-top: 12px;">
-                    <source src="${selectedTrack.preview}" type="audio/mpeg">
+                    <source src="${trackPreview}" type="audio/mpeg">
                     Your browser does not support the audio element.
                 </audio>
             </div>
 
             <!-- Lyrics Section & Share Score Underneath -->
             <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+                ${challengeOutcomeHTML}
                 <div class="lyrics-box" style="margin-bottom: 10px;">
                     <p id="display-lyrics" class="display-lyrics">
                         ${sectionOne.replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>')}
@@ -939,6 +1099,7 @@ function showFinalInfo() {
                 </div>
                 <div class="share-container">
                     <button id="share-score-btn" class="share-btn">📋 Share Score</button>
+                    <button id="share-challenge-btn" class="share-btn challenge-link-btn">🔗 Copy Challenge Link</button>
                     <span id="share-toast" class="share-toast" style="display: none;">Copied to clipboard!</span>
                 </div>
             </div>
@@ -952,6 +1113,11 @@ function showFinalInfo() {
     const shareBtn = document.getElementById('share-score-btn');
     if (shareBtn) {
         shareBtn.addEventListener('click', copyShareScore);
+    }
+
+    const challengeBtn = document.getElementById('share-challenge-btn');
+    if (challengeBtn) {
+        challengeBtn.addEventListener('click', copyChallengeLink);
     }
 
     const audioElement = document.getElementById('song-preview');
@@ -993,7 +1159,7 @@ function endGame() {
     if (endGameBtn) endGameBtn.style.display = 'none';
 
     const searchType = searchTypeDropdown ? searchTypeDropdown.value : 'artist';
-    if (searchType === "song") {
+    if (isSharedGame || searchType === "song") {
         showFinalInfo();
     } else {
         startGuessingPhase();
@@ -1281,8 +1447,111 @@ if (endGameBtn) {
     });
 }
 
+function parseChallengeParams(queryString) {
+    if (!queryString) return null;
+    const params = new URLSearchParams(queryString.startsWith('?') ? queryString : `?${queryString}`);
+    const artist = params.get('artist') || null;
+    const track = params.get('track') || null;
+    const wpmRaw = params.get('wpm');
+    const accRaw = params.get('acc');
+    const startRaw = params.get('start');
+
+    const wpm = (wpmRaw && !isNaN(parseInt(wpmRaw, 10))) ? parseInt(wpmRaw, 10) : null;
+    const acc = (accRaw && !isNaN(parseInt(accRaw, 10))) ? parseInt(accRaw, 10) : null;
+    const start = (startRaw && !isNaN(parseInt(startRaw, 10))) ? parseInt(startRaw, 10) : null;
+
+    if (!artist && !track) return null;
+    return { artist, track, wpm, acc, start };
+}
+
+async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = null) {
+    resetGame(true);
+    isSharedGame = true;
+    if (searchTypeDropdown) searchTypeDropdown.value = 'song';
+
+    const searchQuery = artistName ? `${artistName} ${trackTitle}` : trackTitle;
+    if (artistInput) artistInput.value = searchQuery;
+
+    updateChallengeBanner();
+
+    startLoadingBar();
+    try {
+        const response = await fetch(`/tracks?artist=${encodeURIComponent(searchQuery)}`);
+        if (!response.ok) throw new Error('Failed to find track on Deezer.');
+        const data = await response.json();
+        if (!data.data || data.data.length === 0) {
+            throw new Error(`Track not found: ${searchQuery}`);
+        }
+
+        let match = data.data[0];
+        if (trackTitle && artistName) {
+            const normTitle = normalizeText(trackTitle);
+            const normArtist = normalizeText(artistName);
+            const exact = data.data.find(t => 
+                normalizeText(t.title).includes(normTitle) ||
+                (t.artist && normalizeText(t.artist.name).includes(normArtist))
+            );
+            if (exact) match = exact;
+        }
+
+        selectedTrack = match;
+        const lyricsArtist = (match.artist && match.artist.name) || artistName || '';
+        const lyricsTrack = match.title || trackTitle || '';
+
+        updateChallengeBanner();
+
+        const lyrics = await fetchLyrics(lyricsArtist, lyricsTrack);
+        cachedSongLyrics[`${lyricsArtist}-${lyricsTrack}`] = lyrics;
+
+        typeSection = extractRandomSection(lyrics, 150, 300, targetStartIndex);
+        updateDisplayedText();
+        if (endGameBtn) endGameBtn.style.display = 'inline-block';
+    } catch (error) {
+        console.error('Error loading shared challenge:', error);
+        stopLoadingBar();
+        if (challengeBanner) {
+            challengeBanner.style.display = 'flex';
+            challengeBanner.innerHTML = `⚠️ Could not load challenge for "<strong>${escapeHtml(trackTitle)}</strong>". <button id="challenge-fallback-btn" style="margin-left:8px;padding:4px 8px;cursor:pointer;background:#333;color:#fff;border:1px solid #555;border-radius:4px;">Play random song</button>`;
+            const fallbackBtn = document.getElementById('challenge-fallback-btn');
+            if (fallbackBtn) {
+                fallbackBtn.addEventListener('click', () => {
+                    isSharedGame = false;
+                    challengerWPM = null;
+                    challengerAcc = null;
+                    if (challengeBanner) challengeBanner.style.display = 'none';
+                    loadDefaultPlaylist();
+                });
+            }
+        }
+    } finally {
+        stopLoadingBar();
+    }
+}
+
+async function parseAndLoadUrlParameters() {
+    if (typeof window === 'undefined' || !window.location || !window.location.search) return false;
+    const parsed = parseChallengeParams(window.location.search);
+    if (!parsed) return false;
+
+    challengerWPM = parsed.wpm;
+    challengerAcc = parsed.acc;
+    challengeStartIndex = parsed.start;
+
+    if (parsed.track) {
+        isSharedGame = true;
+        await loadSharedChallenge(parsed.artist, parsed.track, parsed.start);
+        return true;
+    } else if (parsed.artist) {
+        if (artistInput) artistInput.value = parsed.artist;
+        if (searchTypeDropdown) searchTypeDropdown.value = 'artist';
+        await handleArtistSearch(parsed.artist);
+        return true;
+    }
+    return false;
+}
+
 if (typeof window !== 'undefined') {
-    window.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', async () => {
         if (artistInput) artistInput.focus();
         const titleElement = document.querySelector('.navbar-title');
         const titleText = 'TuneTyper';
@@ -1298,8 +1567,12 @@ if (typeof window !== 'undefined') {
 
         if (titleElement) titleElement.textContent = '';
         typeNavbarTitle();
+
+        const loadedFromUrl = await parseAndLoadUrlParameters();
+        if (!loadedFromUrl) {
+            loadDefaultPlaylist();
+        }
     });
-    window.addEventListener('DOMContentLoaded', loadDefaultPlaylist);
 }
 
 // Button Logic
@@ -1449,6 +1722,10 @@ if (typeof module !== 'undefined' && module.exports) {
         resetGame,
         endGame,
         handleTypingInput,
+        generateChallengeUrl,
+        parseChallengeParams,
+        generateShareText,
+        extractRandomSection,
         _getState: () => ({
             totalKeystrokes,
             errorKeystrokes,
@@ -1458,7 +1735,16 @@ if (typeof module !== 'undefined' && module.exports) {
             startTime,
             endTime,
             finalWPM,
-            finalAccuracy
+            finalAccuracy,
+            isSharedGame,
+            challengerWPM,
+            challengerAcc,
+            challengeStartIndex,
+            currentStartIndex,
+            selectedTrack,
+            gaveUp,
+            attemptHistory,
+            guessCount
         }),
         _setState: (state) => {
             if ('totalKeystrokes' in state) totalKeystrokes = state.totalKeystrokes;
@@ -1470,6 +1756,15 @@ if (typeof module !== 'undefined' && module.exports) {
             if ('endTime' in state) endTime = state.endTime;
             if ('finalWPM' in state) finalWPM = state.finalWPM;
             if ('finalAccuracy' in state) finalAccuracy = state.finalAccuracy;
+            if ('isSharedGame' in state) isSharedGame = state.isSharedGame;
+            if ('challengerWPM' in state) challengerWPM = state.challengerWPM;
+            if ('challengerAcc' in state) challengerAcc = state.challengerAcc;
+            if ('challengeStartIndex' in state) challengeStartIndex = state.challengeStartIndex;
+            if ('currentStartIndex' in state) currentStartIndex = state.currentStartIndex;
+            if ('selectedTrack' in state) selectedTrack = state.selectedTrack;
+            if ('gaveUp' in state) gaveUp = state.gaveUp;
+            if ('attemptHistory' in state) attemptHistory = state.attemptHistory;
+            if ('guessCount' in state) guessCount = state.guessCount;
         }
     };
 }
