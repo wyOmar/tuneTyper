@@ -4,10 +4,28 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const {
+    FEATURED_ARTISTS,
     resolveArtistFromSlug,
     renderArtistHtml,
     generateSitemapXml
 } = require('./artists');
+const {
+    UK_TOP_40_PLAYABLE_KEY,
+    UK_TOP_40_RAW_FALLBACK_KEY,
+    WARM_LOCK_KEY,
+    TTL,
+    normalizeCachePart,
+    stripTrackDecorations,
+    lyricsCacheKey,
+    suggestCacheKey,
+    tracksSearchCacheKey,
+    topTracksCacheKey,
+    trackDetailsCacheKey,
+    sanitizeTrackForCache,
+    defaultCache
+} = require('./cache');
+
+const UK_TOP_40_PLAYLIST_ID = '2868476282';
 
 const app = express();
 const PORT = 3000;
@@ -16,6 +34,206 @@ app.use(cors());
 const publicDir = path.join(__dirname, 'public');
 const indexHtmlPath = path.join(publicDir, 'index.html');
 const baseIndexHtml = fs.readFileSync(indexHtmlPath, 'utf-8');
+
+// Helper: run async tasks with bounded concurrency
+async function mapWithConcurrency(items, concurrency, worker) {
+    const results = new Array(items.length);
+    let cursor = 0;
+
+    async function next() {
+        while (cursor < items.length) {
+            const index = cursor++;
+            results[index] = await worker(items[index], index);
+        }
+    }
+
+    const runners = Array.from(
+        { length: Math.min(concurrency, items.length) },
+        () => next()
+    );
+    await Promise.all(runners);
+    return results;
+}
+
+async function queryOvhSingle(artist, trackTitle) {
+    try {
+        const response = await axios.get(
+            `https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(trackTitle)}`,
+            { timeout: 8000 }
+        );
+        const lyrics = response && response.data && typeof response.data.lyrics === 'string'
+            ? response.data.lyrics.trim()
+            : '';
+        if (lyrics) {
+            return { found: true, lyrics: response.data.lyrics };
+        }
+        return { found: false };
+    } catch (error) {
+        if (error && error.response && error.response.status === 404) {
+            return { found: false };
+        }
+        throw error;
+    }
+}
+
+/**
+ * Read-through lyrics resolver:
+ * - Permanent Redis cache on hit (lyrics are immutable & contain no expiring tokens)
+ * - 24h negative cache on genuine 404 / empty lyrics so missing songs don't hammer lyrics.ovh
+ * - Automatic stripped-title retry when Deezer titles include "(feat. ...)" / "- Radio Edit"
+ */
+async function fetchAndCacheLyrics(artist, track, cache = defaultCache) {
+    const primaryKey = lyricsCacheKey(artist, track);
+    const cached = await cache.get(primaryKey);
+    if (cached && typeof cached === 'object') {
+        if (typeof cached.lyrics === 'string' && cached.lyrics.trim()) {
+            return { status: 'hit', lyrics: cached.lyrics, cached: true };
+        }
+        if (cached.notFound) {
+            return { status: 'not_found', lyrics: null, cached: true };
+        }
+    }
+
+    return cache.coalesce(primaryKey, async () => {
+        const recheck = await cache.get(primaryKey);
+        if (recheck && typeof recheck === 'object') {
+            if (typeof recheck.lyrics === 'string' && recheck.lyrics.trim()) {
+                return { status: 'hit', lyrics: recheck.lyrics, cached: true };
+            }
+            if (recheck.notFound) {
+                return { status: 'not_found', lyrics: null, cached: true };
+            }
+        }
+
+        let lookup = await queryOvhSingle(artist, track);
+        let usedFallbackKey = null;
+
+        if (!lookup.found) {
+            const stripped = stripTrackDecorations(track);
+            if (stripped && normalizeCachePart(stripped) !== normalizeCachePart(track)) {
+                const altKey = lyricsCacheKey(artist, stripped);
+                const altCached = await cache.get(altKey);
+                if (altCached && typeof altCached.lyrics === 'string' && altCached.lyrics.trim()) {
+                    lookup = { found: true, lyrics: altCached.lyrics };
+                } else {
+                    lookup = await queryOvhSingle(artist, stripped);
+                    if (lookup.found) {
+                        usedFallbackKey = altKey;
+                    }
+                }
+            }
+        }
+
+        if (lookup.found) {
+            const payload = { lyrics: lookup.lyrics };
+            await cache.set(primaryKey, payload, null); // Permanent 24/7 in Redis
+            if (usedFallbackKey && usedFallbackKey !== primaryKey) {
+                await cache.set(usedFallbackKey, payload, null);
+            }
+            return { status: 'fresh', lyrics: lookup.lyrics, cached: false };
+        }
+
+        await cache.set(primaryKey, { notFound: true }, TTL.LYRICS_MISS_SECONDS);
+        return { status: 'not_found', lyrics: null, cached: false };
+    });
+}
+
+/**
+ * Pre-warms all UK Top 40 tracks (and progressively warms curated SEO tracks from artists.js)
+ * into persistent Redis so default playlist rounds have 100% cache hit rate & zero retry loops.
+ */
+async function warmUkTop40Cache(options = {}) {
+    const cache = options.cache || defaultCache;
+    const concurrency = options.concurrency || 5;
+    const featuredBatchLimit = options.featuredBatchLimit !== undefined ? options.featuredBatchLimit : 30;
+
+    const playlistRes = await axios.get(
+        `https://api.deezer.com/playlist/${UK_TOP_40_PLAYLIST_ID}`,
+        { timeout: 10000 }
+    );
+    const rawTracks = (playlistRes.data && playlistRes.data.tracks && Array.isArray(playlistRes.data.tracks.data))
+        ? playlistRes.data.tracks.data
+        : [];
+
+    const sanitizedChartTracks = rawTracks
+        .map(sanitizeTrackForCache)
+        .filter((t) => t && t.title && t.artist && t.artist.name);
+
+    const chartKeys = sanitizedChartTracks.map((t) => lyricsCacheKey(t.artist.name, t.title));
+    const existingChartEntries = await cache.mget(chartKeys);
+
+    let newlyFetchedLyrics = 0;
+    const playableTracks = [];
+
+    await mapWithConcurrency(sanitizedChartTracks, concurrency, async (track, idx) => {
+        const existing = existingChartEntries[idx];
+        if (existing && typeof existing.lyrics === 'string' && existing.lyrics.trim()) {
+            playableTracks[idx] = track;
+            return;
+        }
+        if (existing && existing.notFound && !options.forceRecheckMissing) {
+            return;
+        }
+
+        try {
+            const result = await fetchAndCacheLyrics(track.artist.name, track.title, cache);
+            if (result.lyrics) {
+                if (!result.cached) newlyFetchedLyrics++;
+                playableTracks[idx] = track;
+            }
+        } catch (err) {
+            console.warn(`Warm skip for "${track.title}" by ${track.artist.name}:`, err.message);
+        }
+    });
+
+    const verifiedTop40 = playableTracks.filter(Boolean);
+    const updatedAt = new Date().toISOString();
+
+    // Only overwrite the 24/7 manifest when at least 1 track succeeded so an upstream OVH outage never wipes cache
+    if (verifiedTop40.length > 0) {
+        await cache.set(UK_TOP_40_PLAYABLE_KEY, {
+            updatedAt,
+            totalChartTracks: sanitizedChartTracks.length,
+            playableCount: verifiedTop40.length,
+            tracks: verifiedTop40
+        }, null);
+    }
+
+    // Progressively pre-warm curated SEO artist tracks (up to featuredBatchLimit uncached songs per run)
+    let featuredWarmed = 0;
+    if (featuredBatchLimit > 0 && Array.isArray(FEATURED_ARTISTS)) {
+        const allFeaturedPairs = [];
+        for (const artist of FEATURED_ARTISTS) {
+            if (!artist || !Array.isArray(artist.tracks)) continue;
+            for (const t of artist.tracks) {
+                if (t && t.title) {
+                    allFeaturedPairs.push({ artist: artist.name, title: t.title });
+                }
+            }
+        }
+
+        const featuredKeys = allFeaturedPairs.map((p) => lyricsCacheKey(p.artist, p.title));
+        const existingFeatured = await cache.mget(featuredKeys);
+        const uncachedFeatured = allFeaturedPairs.filter((_, i) => !existingFeatured[i]).slice(0, featuredBatchLimit);
+
+        await mapWithConcurrency(uncachedFeatured, concurrency, async (pair) => {
+            try {
+                const res = await fetchAndCacheLyrics(pair.artist, pair.title, cache);
+                if (res.lyrics && !res.cached) featuredWarmed++;
+            } catch (_) {}
+        });
+    }
+
+    return {
+        ok: true,
+        redisConfigured: cache.isRedisConfigured(),
+        ukTop40Total: sanitizedChartTracks.length,
+        ukTop40Playable: verifiedTop40.length,
+        newlyFetchedLyrics,
+        featuredWarmed,
+        updatedAt
+    };
+}
 
 // Dynamic XML Sitemap Route (served before static middleware so it is always fresh)
 app.get('/sitemap.xml', (req, res) => {
@@ -35,127 +253,297 @@ app.get('/', (req, res) => {
     res.sendFile(indexHtmlPath);
 });
 
-// Deezer API Route
-app.get('/tracks', async (req, res) => {
-    const { artist } = req.query;
-    if (!artist) return res.status(400).send('Artist name is required.');
+// Daily Vercel Cron Route: Pre-warms UK Top 40 + curated artist lyrics 24/7
+app.get('/api/cron/warm-cache', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const cronSecret = (process.env.CRON_SECRET || '').trim();
+    const isAuthorized = cronSecret && req.headers.authorization === `Bearer ${cronSecret}`;
+
+    if (cronSecret && !isAuthorized) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const force = req.query.force === '1' && isAuthorized;
+    if (!force) {
+        const locked = await defaultCache.acquireLock(WARM_LOCK_KEY, 900);
+        if (!locked) {
+            return res.json({
+                ok: true,
+                skipped: true,
+                reason: 'Cache was already warmed within the last 15 minutes.'
+            });
+        }
+    }
 
     try {
-        const response = await axios.get(`https://api.deezer.com/search?limit=50&q=${encodeURIComponent(artist)}`);
-        res.json(response.data);
+        const summary = await warmUkTop40Cache({
+            forceRecheckMissing: force
+        });
+        res.json(summary);
+    } catch (error) {
+        console.error('Error warming UK Top 40 cache:', error.message);
+        await defaultCache.del(WARM_LOCK_KEY);
+        res.status(500).json({ ok: false, error: 'Failed to warm cache.' });
+    }
+});
+
+// Deezer API Route: Track / Artist Search (sanitized & cached 24h at Edge, 7d in Redis)
+app.get('/tracks', async (req, res) => {
+    const artist = typeof req.query.artist === 'string' ? req.query.artist.trim() : '';
+    if (!artist) return res.status(400).send('Artist name is required.');
+
+    const key = tracksSearchCacheKey(artist);
+
+    try {
+        let cacheHit = true;
+        let payload = await defaultCache.get(key);
+
+        if (!payload) {
+            cacheHit = false;
+            payload = await defaultCache.coalesce(key, async () => {
+                const response = await axios.get(
+                    `https://api.deezer.com/search?limit=50&q=${encodeURIComponent(artist)}`,
+                    { timeout: 8000 }
+                );
+                const rawList = (response.data && Array.isArray(response.data.data))
+                    ? response.data.data
+                    : [];
+                const data = {
+                    data: rawList.map(sanitizeTrackForCache).filter(Boolean)
+                };
+                await defaultCache.set(key, data, TTL.TRACK_LIST_SECONDS);
+                return data;
+            });
+        }
+
+        res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
+        res.setHeader('X-Cache', cacheHit ? 'HIT' : 'MISS');
+        res.json(payload);
     } catch (error) {
         console.error('Error fetching tracks:', error.message);
+        res.setHeader('Cache-Control', 'no-store');
         res.status(500).send('Failed to fetch tracks.');
     }
 });
 
-// Lightweight Edge-cached omnibox autocomplete route (omits expiring audio preview URLs)
+// Lightweight Edge + Redis cached omnibox autocomplete route (omits expiring audio preview URLs)
 app.get('/suggest', async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     if (!q) return res.status(400).send('Query parameter q is required.');
 
+    const key = suggestCacheKey(q);
+
     try {
-        const response = await axios.get(`https://api.deezer.com/search?limit=20&q=${encodeURIComponent(q)}`);
-        const items = (response.data && Array.isArray(response.data.data)) ? response.data.data : [];
+        let cacheHit = true;
+        let payload = await defaultCache.get(key);
 
-        const seenArtists = new Set();
-        const artists = [];
-        const seenTracks = new Set();
-        const tracks = [];
+        if (!payload) {
+            cacheHit = false;
+            payload = await defaultCache.coalesce(key, async () => {
+                const response = await axios.get(
+                    `https://api.deezer.com/search?limit=20&q=${encodeURIComponent(q)}`,
+                    { timeout: 8000 }
+                );
+                const items = (response.data && Array.isArray(response.data.data)) ? response.data.data : [];
 
-        for (const item of items) {
-            if (item.artist && item.artist.name) {
-                const artistKey = item.artist.name.toLowerCase();
-                if (!seenArtists.has(artistKey) && artists.length < 5) {
-                    seenArtists.add(artistKey);
-                    artists.push({
-                        id: item.artist.id,
-                        name: item.artist.name,
-                        picture: item.artist.picture_small || ''
-                    });
+                const seenArtists = new Set();
+                const artists = [];
+                const seenTracks = new Set();
+                const tracks = [];
+
+                for (const item of items) {
+                    if (item.artist && item.artist.name) {
+                        const artistKey = item.artist.name.toLowerCase();
+                        if (!seenArtists.has(artistKey) && artists.length < 5) {
+                            seenArtists.add(artistKey);
+                            artists.push({
+                                id: item.artist.id,
+                                name: item.artist.name,
+                                picture: item.artist.picture_small || ''
+                            });
+                        }
+                    }
+
+                    const rawTitle = (item.title_short || item.title || '').trim();
+                    const artistName = (item.artist && item.artist.name) ? item.artist.name.trim() : '';
+                    if (rawTitle && artistName) {
+                        const trackKey = `${artistName.toLowerCase()}::${rawTitle.toLowerCase()}`;
+                        if (!seenTracks.has(trackKey) && tracks.length < 8) {
+                            seenTracks.add(trackKey);
+                            tracks.push({
+                                id: item.id,
+                                title: rawTitle,
+                                artist: artistName,
+                                cover: (item.album && item.album.cover_small) || ''
+                            });
+                        }
+                    }
                 }
-            }
 
-            const rawTitle = (item.title_short || item.title || '').trim();
-            const artistName = (item.artist && item.artist.name) ? item.artist.name.trim() : '';
-            if (rawTitle && artistName) {
-                const trackKey = `${artistName.toLowerCase()}::${rawTitle.toLowerCase()}`;
-                if (!seenTracks.has(trackKey) && tracks.length < 8) {
-                    seenTracks.add(trackKey);
-                    tracks.push({
-                        id: item.id,
-                        title: rawTitle,
-                        artist: artistName,
-                        cover: (item.album && item.album.cover_small) || ''
-                    });
-                }
-            }
+                const result = { artists, tracks };
+                await defaultCache.set(key, result, TTL.SUGGEST_SECONDS);
+                return result;
+            });
         }
 
         // Safe to cache at Vercel CDN Edge for 24h (7d SWR) since no expiring audio tokens are returned
         res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
-        res.json({ artists, tracks });
+        res.setHeader('X-Cache', cacheHit ? 'HIT' : 'MISS');
+        res.json(payload);
     } catch (error) {
         console.error('Error fetching search suggestions:', error.message);
+        res.setHeader('Cache-Control', 'no-store');
         res.status(500).send('Failed to fetch suggestions.');
     }
 });
 
-// Deezer API: Get top tracks for an artist
+// Deezer API: Get top tracks for an artist (sanitized & cached 24h at Edge, 7d in Redis)
 app.get('/top-tracks', async (req, res) => {
-    const { artistId } = req.query;
+    const artistId = typeof req.query.artistId === 'string' ? req.query.artistId.trim() : '';
     if (!artistId) return res.status(400).send('Artist ID is required.');
     const parsedLimit = parseInt(req.query.limit, 10);
     const limit = (!isNaN(parsedLimit) && parsedLimit > 0) ? Math.min(100, parsedLimit) : 50;
 
+    const key = topTracksCacheKey(artistId, limit);
+
     try {
-        const response = await axios.get(`https://api.deezer.com/artist/${encodeURIComponent(artistId)}/top?limit=${limit}`);
-        res.json(response.data);
+        let cacheHit = true;
+        let payload = await defaultCache.get(key);
+
+        if (!payload) {
+            cacheHit = false;
+            payload = await defaultCache.coalesce(key, async () => {
+                const response = await axios.get(
+                    `https://api.deezer.com/artist/${encodeURIComponent(artistId)}/top?limit=${limit}`,
+                    { timeout: 8000 }
+                );
+                const rawList = (response.data && Array.isArray(response.data.data))
+                    ? response.data.data
+                    : [];
+                const data = {
+                    data: rawList.map(sanitizeTrackForCache).filter(Boolean)
+                };
+                await defaultCache.set(key, data, TTL.TRACK_LIST_SECONDS);
+                return data;
+            });
+        }
+
+        res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
+        res.setHeader('X-Cache', cacheHit ? 'HIT' : 'MISS');
+        res.json(payload);
     } catch (error) {
         console.error('Error fetching top tracks:', error.message);
+        res.setHeader('Cache-Control', 'no-store');
         res.status(500).send('Failed to fetch top tracks.');
     }
 });
 
+// UK Top 40 Default Pool (serves 24/7 pre-warmed verified OVH tracks when available)
 app.get('/default', async (req, res) => {
     try {
-        const response = await axios.get(`https://api.deezer.com/playlist/2868476282`);
-        res.json(response.data);
+        const prewarmed = await defaultCache.get(UK_TOP_40_PLAYABLE_KEY);
+        if (prewarmed && Array.isArray(prewarmed.tracks) && prewarmed.tracks.length > 0) {
+            res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
+            res.setHeader('X-Cache', 'HIT-PREWARMED');
+            return res.json({
+                tracks: { data: prewarmed.tracks },
+                prewarmed: true,
+                updatedAt: prewarmed.updatedAt
+            });
+        }
+
+        let fallback = await defaultCache.get(UK_TOP_40_RAW_FALLBACK_KEY);
+        let cacheHit = true;
+        if (!fallback) {
+            cacheHit = false;
+            fallback = await defaultCache.coalesce(UK_TOP_40_RAW_FALLBACK_KEY, async () => {
+                const response = await axios.get(
+                    `https://api.deezer.com/playlist/${UK_TOP_40_PLAYLIST_ID}`,
+                    { timeout: 8000 }
+                );
+                const rawTracks = (response.data && response.data.tracks && Array.isArray(response.data.tracks.data))
+                    ? response.data.tracks.data
+                    : [];
+                const data = {
+                    tracks: { data: rawTracks.map(sanitizeTrackForCache).filter(Boolean) },
+                    prewarmed: false
+                };
+                await defaultCache.set(UK_TOP_40_RAW_FALLBACK_KEY, data, TTL.RAW_PLAYLIST_FALLBACK_SECONDS);
+                return data;
+            });
+        }
+
+        res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=900');
+        res.setHeader('X-Cache', cacheHit ? 'HIT' : 'MISS');
+        res.json(fallback);
     } catch (error) {
         console.error('Error fetching tracks:', error.message);
+        res.setHeader('Cache-Control', 'no-store');
         res.status(500).send('Failed to fetch tracks.');
     }
 });
 
-// Deezer API: Get track details (release_date, etc.)
+// Deezer API: Get track details + fresh signed 30s audio preview URL (10m Edge + L1 cache)
 app.get('/track-details', async (req, res) => {
-    const { trackId } = req.query;
+    const trackId = typeof req.query.trackId === 'string' ? req.query.trackId.trim() : '';
     if (!trackId) return res.status(400).send('Track ID is required.');
 
+    const key = trackDetailsCacheKey(trackId);
+
     try {
-        const response = await axios.get(`https://api.deezer.com/track/${encodeURIComponent(trackId)}`);
-        res.json({
-            id: response.data.id,
-            release_date: response.data.release_date,
-            bpm: response.data.bpm,
-            duration: response.data.duration
-        });
+        let cacheHit = true;
+        let payload = await defaultCache.get(key, { skipRedis: true });
+
+        if (!payload) {
+            cacheHit = false;
+            payload = await defaultCache.coalesce(key, async () => {
+                const response = await axios.get(
+                    `https://api.deezer.com/track/${encodeURIComponent(trackId)}`,
+                    { timeout: 8000 }
+                );
+                const data = {
+                    id: response.data.id,
+                    release_date: response.data.release_date,
+                    bpm: response.data.bpm,
+                    duration: response.data.duration,
+                    preview: response.data.preview || ''
+                };
+                await defaultCache.set(key, data, TTL.TRACK_DETAILS_SECONDS, { skipRedis: true });
+                return data;
+            });
+        }
+
+        // 10m Edge TTL keeps Deezer signed hdnea= preview URLs fresh while deduplicating bursts
+        res.setHeader('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=300');
+        res.setHeader('X-Cache', cacheHit ? 'HIT' : 'MISS');
+        res.json(payload);
     } catch (error) {
         console.error('Error fetching track details:', error.message);
+        res.setHeader('Cache-Control', 'no-store');
         res.status(500).send('Failed to fetch track details.');
     }
 });
 
-// OVH Lyrics API Route
+// OVH Lyrics API Route (cached permanently in Redis & 30d at Vercel CDN Edge)
 app.get('/lyrics', async (req, res) => {
-    const { artist, track } = req.query;
+    const artist = typeof req.query.artist === 'string' ? req.query.artist.trim() : '';
+    const track = typeof req.query.track === 'string' ? req.query.track.trim() : '';
     if (!artist || !track) return res.status(400).send('Artist and track name are required.');
 
     try {
-        const response = await axios.get(`https://api.lyrics.ovh/v1/${encodeURIComponent(artist)}/${encodeURIComponent(track)}`);
-        res.json(response.data);
+        const result = await fetchAndCacheLyrics(artist, track, defaultCache);
+        if (!result.lyrics) {
+            res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=86400');
+            res.setHeader('X-Cache', result.cached ? 'HIT-MISS' : 'MISS');
+            return res.status(404).json({ error: 'Lyrics not found.' });
+        }
+
+        res.setHeader('Cache-Control', 'public, s-maxage=2592000, stale-while-revalidate=2592000');
+        res.setHeader('X-Cache', result.cached ? 'HIT' : 'MISS');
+        res.json({ lyrics: result.lyrics });
     } catch (error) {
         console.error('Error fetching lyrics:', error.message);
+        res.setHeader('Cache-Control', 'no-store');
         res.status(500).send('Failed to fetch lyrics.');
     }
 });
@@ -188,6 +576,11 @@ app.get('/:slug', (req, res, next) => {
 if (require.main === module) {
     app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
 }
+
+// Expose internals on handler function for deterministic testing without changing default export type
+app._cache = defaultCache;
+app._warmUkTop40Cache = warmUkTop40Cache;
+app._fetchAndCacheLyrics = fetchAndCacheLyrics;
 
 // @vercel/node requires the default export of server.js to be a request handler function or http.Server
 module.exports = app;
