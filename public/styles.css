@@ -1274,7 +1274,8 @@ h1 {
     }
 }
 
-.artist-track-card {
+.artist-track-card,
+.playlist-card {
     background: #262626;
     border: 1px solid #353535;
     border-radius: 8px;
@@ -1288,19 +1289,27 @@ h1 {
     transition: transform 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
 }
 
-.artist-track-card:hover {
+.artist-track-card:hover,
+.playlist-card:hover {
     transform: translateY(-2px);
     border-color: #4caf50;
     background: #2c2c2c;
 }
 
-.artist-track-card:active {
+.artist-track-card:active,
+.playlist-card:active {
     transform: scale(0.98);
 }
 
-.artist-track-card.active {
+.artist-track-card.active,
+.playlist-card.active {
     border-color: #4caf50;
     background: #1c2b1e;
+}
+
+.playlist-card.active .track-card-overlay {
+    opacity: 1;
+    background: rgba(46, 125, 50, 0.88);
 }
 
 .track-card-cover-wrap {

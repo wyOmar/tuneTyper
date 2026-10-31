@@ -10,8 +10,18 @@ const {
     generateSitemapXml
 } = require('./artists');
 const {
+    DEFAULT_PLAYLIST_ID,
+    CURATED_PLAYLISTS,
+    getCuratedPlaylist,
+    getDefaultPlaylist
+} = require('./playlists');
+const {
+    playlistPlayableKey,
+    playlistRawFallbackKey,
     UK_TOP_40_PLAYABLE_KEY,
     UK_TOP_40_RAW_FALLBACK_KEY,
+    DEFAULT_PLAYABLE_KEY,
+    DEFAULT_RAW_FALLBACK_KEY,
     WARM_LOCK_KEY,
     TTL,
     normalizeCachePart,
@@ -140,34 +150,32 @@ async function fetchAndCacheLyrics(artist, track, cache = defaultCache) {
 }
 
 /**
- * Pre-warms all UK Top 40 tracks (and progressively warms curated SEO tracks from artists.js)
- * into persistent Redis so default playlist rounds have 100% cache hit rate & zero retry loops.
+ * Pre-warms a single playlist into persistent Redis by verifying playable lyrics with lyrics.ovh.
  */
-async function warmUkTop40Cache(options = {}) {
+async function warmSinglePlaylist(playlistId, options = {}) {
     const cache = options.cache || defaultCache;
     const concurrency = options.concurrency || 5;
-    const featuredBatchLimit = options.featuredBatchLimit !== undefined ? options.featuredBatchLimit : 30;
 
     const playlistRes = await axios.get(
-        `https://api.deezer.com/playlist/${UK_TOP_40_PLAYLIST_ID}`,
+        `https://api.deezer.com/playlist/${encodeURIComponent(playlistId)}`,
         { timeout: 10000 }
     );
     const rawTracks = (playlistRes.data && playlistRes.data.tracks && Array.isArray(playlistRes.data.tracks.data))
         ? playlistRes.data.tracks.data
         : [];
 
-    const sanitizedChartTracks = rawTracks
+    const sanitizedTracks = rawTracks
         .map(sanitizeTrackForCache)
         .filter((t) => t && t.title && t.artist && t.artist.name);
 
-    const chartKeys = sanitizedChartTracks.map((t) => lyricsCacheKey(t.artist.name, t.title));
-    const existingChartEntries = await cache.mget(chartKeys);
+    const trackKeys = sanitizedTracks.map((t) => lyricsCacheKey(t.artist.name, t.title));
+    const existingEntries = await cache.mget(trackKeys);
 
     let newlyFetchedLyrics = 0;
     const playableTracks = [];
 
-    await mapWithConcurrency(sanitizedChartTracks, concurrency, async (track, idx) => {
-        const existing = existingChartEntries[idx];
+    await mapWithConcurrency(sanitizedTracks, concurrency, async (track, idx) => {
+        const existing = existingEntries[idx];
         if (existing && typeof existing.lyrics === 'string' && existing.lyrics.trim()) {
             playableTracks[idx] = track;
             return;
@@ -187,21 +195,57 @@ async function warmUkTop40Cache(options = {}) {
         }
     });
 
-    const verifiedTop40 = playableTracks.filter(Boolean);
+    const verified = playableTracks.filter(Boolean);
     const updatedAt = new Date().toISOString();
+    const playableKey = playlistPlayableKey(playlistId);
 
-    // Only overwrite the 24/7 manifest when at least 1 track succeeded so an upstream OVH outage never wipes cache
-    if (verifiedTop40.length > 0) {
-        await cache.set(UK_TOP_40_PLAYABLE_KEY, {
+    // Only overwrite manifest when at least 1 track succeeded so upstream OVH outages never wipe cache
+    if (verified.length > 0) {
+        await cache.set(playableKey, {
             updatedAt,
-            totalChartTracks: sanitizedChartTracks.length,
-            playableCount: verifiedTop40.length,
-            tracks: verifiedTop40
+            playlistId,
+            totalChartTracks: sanitizedTracks.length,
+            totalTracks: sanitizedTracks.length,
+            playableCount: verified.length,
+            tracks: verified
         }, null);
+    }
+
+    return {
+        playlistId,
+        total: sanitizedTracks.length,
+        playable: verified.length,
+        newlyFetchedLyrics,
+        updatedAt
+    };
+}
+
+/**
+ * Pre-warms curated playlists (default 20s Pop + other curated playlists) and SEO artist tracks.
+ */
+async function warmCuratedPlaylistsCache(options = {}) {
+    const cache = options.cache || defaultCache;
+    const concurrency = options.concurrency || 5;
+    const playlistIds = Array.isArray(options.playlistIds) && options.playlistIds.length > 0
+        ? options.playlistIds
+        : (options.playlistId ? [options.playlistId] : [DEFAULT_PLAYLIST_ID, UK_TOP_40_PLAYLIST_ID]);
+
+    const playlistSummaries = [];
+    let totalNewlyFetchedLyrics = 0;
+
+    for (const id of playlistIds) {
+        try {
+            const res = await warmSinglePlaylist(id, { ...options, cache, concurrency });
+            playlistSummaries.push(res);
+            totalNewlyFetchedLyrics += res.newlyFetchedLyrics;
+        } catch (err) {
+            console.warn(`Failed warming playlist ${id}:`, err.message);
+        }
     }
 
     // Progressively pre-warm curated SEO artist tracks (up to featuredBatchLimit uncached songs per run)
     let featuredWarmed = 0;
+    const featuredBatchLimit = options.featuredBatchLimit !== undefined ? options.featuredBatchLimit : 30;
     if (featuredBatchLimit > 0 && Array.isArray(FEATURED_ARTISTS)) {
         const allFeaturedPairs = [];
         for (const artist of FEATURED_ARTISTS) {
@@ -225,15 +269,25 @@ async function warmUkTop40Cache(options = {}) {
         });
     }
 
+    const defaultSummary = playlistSummaries.find(p => p.playlistId === DEFAULT_PLAYLIST_ID) || playlistSummaries[0] || {};
+    const ukSummary = playlistSummaries.find(p => p.playlistId === UK_TOP_40_PLAYLIST_ID) || defaultSummary;
+
     return {
         ok: true,
         redisConfigured: cache.isRedisConfigured(),
-        ukTop40Total: sanitizedChartTracks.length,
-        ukTop40Playable: verifiedTop40.length,
-        newlyFetchedLyrics,
+        defaultTotal: defaultSummary.total || 0,
+        defaultPlayable: defaultSummary.playable || 0,
+        ukTop40Total: ukSummary.total !== undefined ? ukSummary.total : 0,
+        ukTop40Playable: ukSummary.playable !== undefined ? ukSummary.playable : 0,
+        playlists: playlistSummaries,
+        newlyFetchedLyrics: totalNewlyFetchedLyrics,
         featuredWarmed,
-        updatedAt
+        updatedAt: new Date().toISOString()
     };
+}
+
+async function warmUkTop40Cache(options = {}) {
+    return warmCuratedPlaylistsCache(options);
 }
 
 // Dynamic XML Sitemap Route (served before static middleware so it is always fresh)
@@ -445,48 +499,112 @@ app.get('/top-tracks', async (req, res) => {
     }
 });
 
-// UK Top 40 Default Pool (serves 24/7 pre-warmed verified OVH tracks when available)
+async function getPlaylistTracks(playlistId, options = {}) {
+    const cache = options.cache || defaultCache;
+    const resolvedId = String(playlistId || DEFAULT_PLAYLIST_ID).trim();
+    const playableKey = playlistPlayableKey(resolvedId);
+    const rawKey = playlistRawFallbackKey(resolvedId);
+
+    const prewarmed = await cache.get(playableKey);
+    if (prewarmed && Array.isArray(prewarmed.tracks) && prewarmed.tracks.length > 0) {
+        return {
+            tracks: { data: prewarmed.tracks },
+            prewarmed: true,
+            updatedAt: prewarmed.updatedAt,
+            cacheStatus: 'HIT-PREWARMED'
+        };
+    }
+
+    let fallback = await cache.get(rawKey);
+    let cacheHit = true;
+    if (!fallback) {
+        cacheHit = false;
+        fallback = await cache.coalesce(rawKey, async () => {
+            const response = await axios.get(
+                `https://api.deezer.com/playlist/${encodeURIComponent(resolvedId)}`,
+                { timeout: 8000 }
+            );
+            const rawTracks = (response.data && response.data.tracks && Array.isArray(response.data.tracks.data))
+                ? response.data.tracks.data
+                : [];
+            const data = {
+                tracks: { data: rawTracks.map(sanitizeTrackForCache).filter(Boolean) },
+                prewarmed: false
+            };
+            await cache.set(rawKey, data, TTL.RAW_PLAYLIST_FALLBACK_SECONDS);
+            return data;
+        });
+    }
+
+    return {
+        ...fallback,
+        cacheStatus: cacheHit ? 'HIT' : 'MISS'
+    };
+}
+
+// Curated Playlists metadata route (Edge cached 24h)
+app.get('/playlists', (req, res) => {
+    res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
+    res.json({
+        defaultPlaylistId: DEFAULT_PLAYLIST_ID,
+        playlists: CURATED_PLAYLISTS
+    });
+});
+
+// Curated Playlist Default Pool (serves 24/7 pre-warmed verified OVH tracks when available)
 app.get('/default', async (req, res) => {
     try {
-        const prewarmed = await defaultCache.get(UK_TOP_40_PLAYABLE_KEY);
-        if (prewarmed && Array.isArray(prewarmed.tracks) && prewarmed.tracks.length > 0) {
+        const queryId = req.query.id || req.query.playlist;
+        const target = queryId ? getCuratedPlaylist(queryId) : getDefaultPlaylist();
+        const playlistId = target ? target.id : (queryId || DEFAULT_PLAYLIST_ID);
+
+        const result = await getPlaylistTracks(playlistId);
+        if (result.cacheStatus === 'HIT-PREWARMED') {
             res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
             res.setHeader('X-Cache', 'HIT-PREWARMED');
-            return res.json({
-                tracks: { data: prewarmed.tracks },
-                prewarmed: true,
-                updatedAt: prewarmed.updatedAt
-            });
+        } else {
+            res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=900');
+            res.setHeader('X-Cache', result.cacheStatus);
         }
 
-        let fallback = await defaultCache.get(UK_TOP_40_RAW_FALLBACK_KEY);
-        let cacheHit = true;
-        if (!fallback) {
-            cacheHit = false;
-            fallback = await defaultCache.coalesce(UK_TOP_40_RAW_FALLBACK_KEY, async () => {
-                const response = await axios.get(
-                    `https://api.deezer.com/playlist/${UK_TOP_40_PLAYLIST_ID}`,
-                    { timeout: 8000 }
-                );
-                const rawTracks = (response.data && response.data.tracks && Array.isArray(response.data.tracks.data))
-                    ? response.data.tracks.data
-                    : [];
-                const data = {
-                    tracks: { data: rawTracks.map(sanitizeTrackForCache).filter(Boolean) },
-                    prewarmed: false
-                };
-                await defaultCache.set(UK_TOP_40_RAW_FALLBACK_KEY, data, TTL.RAW_PLAYLIST_FALLBACK_SECONDS);
-                return data;
-            });
-        }
-
-        res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=900');
-        res.setHeader('X-Cache', cacheHit ? 'HIT' : 'MISS');
-        res.json(fallback);
+        res.json({
+            playlist: target || { id: playlistId },
+            tracks: result.tracks,
+            prewarmed: result.prewarmed,
+            updatedAt: result.updatedAt
+        });
     } catch (error) {
         console.error('Error fetching tracks:', error.message);
         res.setHeader('Cache-Control', 'no-store');
         res.status(500).send('Failed to fetch tracks.');
+    }
+});
+
+// Curated Playlist by ID / Slug route
+app.get('/playlist/:id', async (req, res) => {
+    try {
+        const target = getCuratedPlaylist(req.params.id);
+        const playlistId = target ? target.id : req.params.id;
+
+        const result = await getPlaylistTracks(playlistId);
+        if (result.cacheStatus === 'HIT-PREWARMED') {
+            res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
+            res.setHeader('X-Cache', 'HIT-PREWARMED');
+        } else {
+            res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=900');
+            res.setHeader('X-Cache', result.cacheStatus);
+        }
+
+        res.json({
+            playlist: target || { id: playlistId },
+            tracks: result.tracks,
+            prewarmed: result.prewarmed,
+            updatedAt: result.updatedAt
+        });
+    } catch (error) {
+        console.error('Error fetching playlist:', error.message);
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(500).send('Failed to fetch playlist.');
     }
 });
 
@@ -587,6 +705,8 @@ if (require.main === module) {
 // Expose internals on handler function for deterministic testing without changing default export type
 app._cache = defaultCache;
 app._warmUkTop40Cache = warmUkTop40Cache;
+app._warmCuratedPlaylistsCache = warmCuratedPlaylistsCache;
+app._getPlaylistTracks = getPlaylistTracks;
 app._fetchAndCacheLyrics = fetchAndCacheLyrics;
 
 // @vercel/node requires the default export of server.js to be a request handler function or http.Server

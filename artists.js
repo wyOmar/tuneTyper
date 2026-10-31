@@ -1119,6 +1119,8 @@ const RESERVED_SLUGS = new Set([
     "suggest",
     "top-tracks",
     "default",
+    "playlists",
+    "playlist",
     "track-details",
     "lyrics",
     "sitemap.xml",
@@ -1387,6 +1389,12 @@ function renderArtistHtml(artist, baseIndexHtml) {
     if (html.includes("<div id=\"artist-tracks-slot\"></div>")) {
         html = html.replace("<div id=\"artist-tracks-slot\"></div>", shelfHtml);
     }
+
+    // Hide curated playlists shelf on artist landing routes so artist tracks are front-and-center
+    html = html.replace(
+        /<div id=["']curated-playlists-slot["']>[\s\S]*?<\/section>\s*<\/div>/i,
+        '<div id="curated-playlists-slot" style="display: none;"></div>'
+    );
 
     // Highlight current artist link in footer navigation
     const escapedSlugForRegex = artist.slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

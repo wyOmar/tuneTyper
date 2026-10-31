@@ -221,19 +221,43 @@ async function fetchTopTracks(artistId, limit = 50) {
     return data.data;
 }
 
-async function loadDefaultPlaylist() {
+let currentPlaylistId = '13650203641';
+
+function updatePlaylistCardsActiveState(activeId) {
+    if (typeof document === 'undefined') return;
+    const cards = document.querySelectorAll('.playlist-card');
+    cards.forEach(card => {
+        const id = card.getAttribute('data-playlist-id');
+        const isActive = id === String(activeId);
+        if (isActive) {
+            card.classList.add('active');
+            const overlay = card.querySelector('.track-card-overlay');
+            if (overlay) overlay.textContent = '\u2713 Active';
+        } else {
+            card.classList.remove('active');
+            const overlay = card.querySelector('.track-card-overlay');
+            if (overlay) overlay.textContent = '\u25b6 Play';
+        }
+    });
+}
+
+async function loadCuratedPlaylist(playlistId = currentPlaylistId) {
     currentGameMode = 'artist';
+    currentPlaylistId = String(playlistId || '13650203641').trim();
+    updatePlaylistCardsActiveState(currentPlaylistId);
     syncShelfVisibility('');
+
     if (typeof document !== 'undefined') {
         const shelf = document.getElementById('artist-tracks-shelf');
         if (shelf) shelf.style.display = 'none';
     }
+
     try {
-        const response = await fetch('/default');
+        const response = await fetch(`/default?id=${encodeURIComponent(currentPlaylistId)}`);
         if (!response.ok) throw new Error('Failed to fetch playlist data.');
 
         const data = await response.json();
-        const tracks = data.tracks.data;
+        const tracks = data.tracks && Array.isArray(data.tracks.data) ? data.tracks.data : [];
 
         if (tracks.length === 0) throw new Error('No tracks found in the playlist.');
 
@@ -275,6 +299,10 @@ async function loadDefaultPlaylist() {
     } catch (error) {
         console.error(error.message);
     }
+}
+
+async function loadDefaultPlaylist() {
+    return loadCuratedPlaylist(currentPlaylistId);
 }
 // Utility Functions
 function extractRandomSection(text, minLength = 150, maxLength = 300, targetStartIndex = null) {
@@ -2302,16 +2330,22 @@ function syncShelfVisibility(targetArtistName, activeTrackTitle = '') {
             }
         }
     });
-    const shelf = document.getElementById('artist-tracks-shelf');
-    if (!shelf) return;
+    const artistShelf = document.getElementById('artist-tracks-shelf');
+    const playlistShelf = document.getElementById('curated-playlists-shelf');
     const initialName = (typeof window !== 'undefined' && window.__INITIAL_ARTIST__ && window.__INITIAL_ARTIST__.name)
         ? normOmnibox(window.__INITIAL_ARTIST__.name)
         : '';
-    const shelfName = (shelf.getAttribute && shelf.getAttribute('data-artist-name'))
-        ? normOmnibox(shelf.getAttribute('data-artist-name'))
+    const shelfName = (artistShelf && artistShelf.getAttribute && artistShelf.getAttribute('data-artist-name'))
+        ? normOmnibox(artistShelf.getAttribute('data-artist-name'))
         : initialName;
     const matchesTarget = Boolean(targetArtistNorm && shelfName && targetArtistNorm === shelfName);
-    shelf.style.display = matchesTarget ? '' : 'none';
+
+    if (artistShelf) {
+        artistShelf.style.display = matchesTarget ? '' : 'none';
+    }
+    if (playlistShelf) {
+        playlistShelf.style.display = matchesTarget ? 'none' : '';
+    }
 }
 
 function renderArtistPopularTracksShelf(artistName, tracks) {
@@ -2970,6 +3004,39 @@ function bindArtistTrackCards(typingSpeed = 22) {
     });
 }
 
+function bindPlaylistCards() {
+    if (typeof document === 'undefined') return;
+    const cards = document.querySelectorAll('.playlist-card');
+    cards.forEach((card) => {
+        if (card._boundPlaylistClick) return;
+        card._boundPlaylistClick = true;
+        card.addEventListener('click', async () => {
+            const playlistId = card.getAttribute('data-playlist-id');
+            if (!playlistId) return;
+
+            hideSearchSuggestions();
+            stopWPMUpdater();
+            resetGame();
+            if (artistInput) artistInput.value = '';
+            syncArtistClearButton();
+
+            if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+
+            try {
+                startLoadingBar();
+                await loadCuratedPlaylist(playlistId);
+                if (typingArea && !typingArea.disabled) typingArea.focus();
+            } catch (err) {
+                showToast(err.message, 'error');
+            } finally {
+                stopLoadingBar();
+            }
+        });
+    });
+}
+
 if (typeof window !== 'undefined') {
     window.addEventListener('DOMContentLoaded', async () => {
         const titleElement = document.querySelector('.navbar-title');
@@ -2987,6 +3054,8 @@ if (typeof window !== 'undefined') {
         if (titleElement) titleElement.textContent = '';
         typeNavbarTitle();
         bindArtistTrackCards();
+        bindPlaylistCards();
+        updatePlaylistCardsActiveState(currentPlaylistId);
         syncArtistClearButton();
         syncTypingAreaCaseStyle();
 
@@ -3252,6 +3321,10 @@ if (typeof module !== 'undefined' && module.exports) {
         isPreviewUrlFresh,
         fetchTrackDetails,
         loadDefaultPlaylist,
+        loadCuratedPlaylist,
+        bindPlaylistCards,
+        updatePlaylistCardsActiveState,
+        getCurrentPlaylistId: () => currentPlaylistId,
         handleArtistSearch,
         handleSongSearch,
         ensureSelectedArtistCandidates,
