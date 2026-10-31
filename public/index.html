@@ -84,9 +84,18 @@
         </div>
 
         <div id="guess-section" class="guess-section" style="display: none;">
-            <h3 class="guess-heading">🎵 Guess the Song</h3>
+            <h3 class="guess-heading">
+                <span class="guess-heading-content">
+                    <svg class="guess-heading-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M9 18V5l12-2v13"></path>
+                        <circle cx="6" cy="18" r="3"></circle>
+                        <circle cx="18" cy="16" r="3"></circle>
+                    </svg>
+                    <span>Guess the Song</span>
+                </span>
+            </h3>
             
-            <div id="mystery-title" class="mystery-title" aria-label="Song title pattern"></div>
+            <div id="mystery-title" class="mystery-title" aria-label="Song title pattern" style="display: none;"></div>
 
             <div class="hints-panel">
                 <div class="hints-top-bar">
@@ -103,7 +112,6 @@
                 <div class="hints-body">
                     <div class="hint-cover-box">
                         <img id="hint-cover-img" class="hint-cover-img" src="" alt="Album Art">
-                        <span class="hint-cover-label">Album Art</span>
                     </div>
 
                     <div class="hint-details-box">
