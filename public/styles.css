@@ -358,27 +358,40 @@ h1 {
     font-weight: bold;
 }
 
-.next-hint-btn {
-    background: #333;
-    color: #d1d1d1;
-    border: 1px solid #555;
-    border-radius: 5px;
-    padding: 5px 12px;
-    font-size: 13px;
-    font-family: monospace;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+.attempt-tracker {
+    display: flex;
+    gap: 6px;
+    align-items: center;
 }
 
-.next-hint-btn:hover:not(:disabled) {
-    background: #444;
-    color: #fff;
+.attempt-dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    background: #333;
+    border: 1px solid #555;
+    transition: all 0.2s ease;
+}
+
+.attempt-dot.current {
+    border-color: #4caf50;
+    background: rgba(76, 175, 80, 0.25);
+    box-shadow: 0 0 6px rgba(76, 175, 80, 0.4);
+}
+
+.attempt-dot.correct {
+    background: #4caf50;
     border-color: #4caf50;
 }
 
-.next-hint-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+.attempt-dot.wrong {
+    background: #dc3545;
+    border-color: #dc3545;
+}
+
+.attempt-dot.skipped {
+    background: #555;
+    border-color: #666;
 }
 
 .hints-body {
@@ -405,10 +418,10 @@ h1 {
     transition: filter 0.4s ease;
 }
 
-.blur-stage-1 { filter: blur(22px) contrast(1.1); }
-.blur-stage-2 { filter: blur(14px) contrast(1.05); }
-.blur-stage-3 { filter: blur(8px); }
-.blur-stage-4 { filter: blur(3px); }
+.blur-stage-1 { filter: blur(24px) contrast(1.1); }
+.blur-stage-2 { filter: blur(16px) contrast(1.05); }
+.blur-stage-3 { filter: blur(9px); }
+.blur-stage-4 { filter: blur(4px); }
 .blur-stage-5 { filter: blur(0px); }
 
 .hint-cover-label {
@@ -529,6 +542,17 @@ h1 {
     gap: 8px;
 }
 
+@keyframes shakeInput {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-6px); }
+    40%, 80% { transform: translateX(6px); }
+}
+
+.guess-input-container.shake #guess-input {
+    animation: shakeInput 0.4s ease;
+    border-color: #dc3545;
+}
+
 #guess-input {
     flex: 1;
     min-width: 0;
@@ -540,6 +564,7 @@ h1 {
     background-color: #333;
     color: #fff;
     height: 22px;
+    transition: border-color 0.2s;
 }
 
 #guess-input:focus {
@@ -570,21 +595,34 @@ h1 {
     background-color: #43a047;
 }
 
-#give-up {
-    padding: 10px 16px;
+.skip-btn {
+    padding: 10px 18px;
     font-size: 15px;
     font-family: monospace;
+    font-weight: bold;
     height: 44px;
-    color: #fff;
-    background-color: #dc3545;
-    border: none;
+    color: #ddd;
+    background-color: #333;
+    border: 1px solid #555;
     border-radius: 5px;
     cursor: pointer;
     flex-shrink: 0;
-    transition: background-color 0.15s;
+    transition: background-color 0.15s, border-color 0.15s, color 0.15s;
 }
 
-#give-up:hover {
+.skip-btn:hover {
+    background-color: #444;
+    border-color: #777;
+    color: #fff;
+}
+
+.skip-btn.give-up-mode {
+    background-color: #dc3545;
+    border-color: #dc3545;
+    color: #fff;
+}
+
+.skip-btn.give-up-mode:hover {
     background-color: #b52a37;
 }
 
@@ -632,12 +670,6 @@ h1 {
 .guess-suggestion-item .item-artist {
     font-size: 12px;
     color: #888;
-}
-
-#guess-feedback {
-    font-size: 16px;
-    margin-top: 12px;
-    min-height: 24px;
 }
 
 /* Song Info Section */
@@ -709,11 +741,10 @@ h1 {
 
 /* Share Score */
 .share-container {
-    margin-top: 15px;
+    margin-top: 10px;
     display: flex;
-    flex-direction: column;
     align-items: center;
-    gap: 8px;
+    gap: 12px;
 }
 
 .share-btn {
@@ -721,7 +752,7 @@ h1 {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 10px 18px;
+    padding: 10px 22px;
     font-size: 16px;
     font-family: monospace;
     font-weight: bold;
@@ -730,8 +761,8 @@ h1 {
     border: none;
     border-radius: 5px;
     cursor: pointer;
-    width: 100%;
-    max-width: 250px;
+    width: auto;
+    min-width: 170px;
     transition: background-color 0.15s ease, transform 0.05s ease;
 }
 

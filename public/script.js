@@ -10,15 +10,15 @@ const includeNumbersCheckbox = document.getElementById('include-numbers');
 const songInfo = document.getElementById('song-info');
 const guessSection = document.getElementById('guess-section');
 const guessInput = document.getElementById('guess-input');
-const giveUpButton = document.getElementById('give-up');
-const guessFeedback = document.getElementById('guess-feedback');
+const guessInputContainer = document.querySelector('.guess-input-container');
+const skipBtn = document.getElementById('skip-btn');
 const searchTypeDropdown = document.getElementById('search-type');
 const endGameBtn = document.getElementById('end-game-btn');
 
 // Hint Elements
 const mysteryTitle = document.getElementById('mystery-title');
 const hintStageBadge = document.getElementById('hint-stage-badge');
-const nextHintBtn = document.getElementById('next-hint-btn');
+const attemptTracker = document.getElementById('attempt-tracker');
 const hintCoverImg = document.getElementById('hint-cover-img');
 const hintBadges = document.getElementById('hint-badges');
 const snippetPlayBtn = document.getElementById('snippet-play-btn');
@@ -53,7 +53,7 @@ const SNIPPET_DURATIONS = [2, 5, 10, 18, 30];
 let snippetAudio = null;
 let snippetProgressAnim = null;
 let isSnippetPlaying = false;
-let revealedLetters = new Set();
+let attemptHistory = []; // stores 'wrong', 'skipped', or 'correct'
 let candidateSongs = [];
 let trackExtraDetails = null;
 let suggestionSelectedIndex = -1;
@@ -268,7 +268,7 @@ function resetGame() {
     finalAccuracy = 100;
     gaveUp = false;
     hintStage = 1;
-    revealedLetters.clear();
+    attemptHistory = [];
     candidateSongs = [];
     trackExtraDetails = null;
     stopSnippet();
@@ -281,8 +281,8 @@ function resetGame() {
     wpmResult.textContent = '';
     songInfo.innerHTML = '';
     guessSection.style.display = 'none';
-    guessFeedback.innerHTML = '';
     guessInput.value = '';
+    if (guessInputContainer) guessInputContainer.classList.remove('shake');
     if (mysteryTitle) mysteryTitle.innerHTML = '';
     removePunctuationCheckbox.disabled = false;
     removeAdlibsCheckbox.disabled = false;
@@ -428,13 +428,13 @@ async function fetchTrackDetails(trackId) {
 function startGuessingPhase() {
     guessCount = 0;
     hintStage = 1;
-    revealedLetters.clear();
+    attemptHistory = [];
     trackExtraDetails = null;
     stopSnippet();
     hideSuggestions();
 
-    guessFeedback.innerHTML = '';
     guessInput.value = '';
+    if (guessInputContainer) guessInputContainer.classList.remove('shake');
 
     populateCandidateSongs();
 
@@ -454,19 +454,6 @@ function renderMysteryTitle() {
     const cleanTitle = removeParentheses(selectedTrack.title).trim();
     const words = cleanTitle.split(/\s+/).filter(Boolean);
 
-    // If hintStage >= 4, auto-reveal first letter of each word
-    const autoFirstLetters = new Set();
-    if (hintStage >= 4) {
-        words.forEach(word => {
-            for (let i = 0; i < word.length; i++) {
-                if (/[a-z0-9]/i.test(word[i])) {
-                    autoFirstLetters.add(word[i].toUpperCase());
-                    break;
-                }
-            }
-        });
-    }
-
     let totalLetters = 0;
     const wordsHtml = words.map(word => {
         let charsHtml = '';
@@ -476,8 +463,9 @@ function renderMysteryTitle() {
             if (isAlpha) {
                 totalLetters++;
                 const upper = ch.toUpperCase();
-                const isRevealed = revealedLetters.has(upper) || autoFirstLetters.has(upper);
-                if (isRevealed) {
+                // On Hint 4+, reveal only the initial letter of each word (e.g. L _ _ _ _)
+                const isFirstLetterOfWord = (i === 0);
+                if (hintStage >= 4 && isFirstLetterOfWord) {
                     charsHtml += `<span class="mystery-char revealed">${escapeHtml(upper)}</span>`;
                 } else {
                     charsHtml += `<span class="mystery-char">_</span>`;
@@ -494,12 +482,39 @@ function renderMysteryTitle() {
     mysteryTitle.innerHTML = wordsHtml + summary;
 }
 
+function updateAttemptTracker() {
+    if (!attemptTracker) return;
+    const dots = attemptTracker.querySelectorAll('.attempt-dot');
+    dots.forEach((dot, index) => {
+        dot.className = 'attempt-dot';
+        if (index < attemptHistory.length) {
+            dot.classList.add(attemptHistory[index]); // 'wrong', 'skipped', or 'correct'
+        } else if (index === hintStage - 1) {
+            dot.classList.add('current');
+        }
+    });
+}
+
+function updateSkipBtn() {
+    if (!skipBtn) return;
+    if (hintStage >= 5) {
+        skipBtn.textContent = 'Give Up';
+        skipBtn.classList.add('give-up-mode');
+    } else {
+        skipBtn.textContent = 'Skip';
+        skipBtn.classList.remove('give-up-mode');
+    }
+}
+
 function updateHintsUI() {
     if (!selectedTrack) return;
 
     if (hintStageBadge) {
-        hintStageBadge.textContent = `Hint ${hintStage} / 5`;
+        hintStageBadge.textContent = `Attempt ${hintStage} / 5`;
     }
+
+    updateAttemptTracker();
+    updateSkipBtn();
 
     // Progressive Album Cover
     if (hintCoverImg) {
@@ -510,28 +525,17 @@ function updateHintsUI() {
         hintCoverImg.className = `hint-cover-img blur-stage-${hintStage}`;
     }
 
-    // Next Hint Button
-    if (nextHintBtn) {
-        if (hintStage >= 5) {
-            nextHintBtn.disabled = true;
-            nextHintBtn.textContent = 'All hints unlocked';
-        } else {
-            nextHintBtn.disabled = false;
-            nextHintBtn.textContent = '💡 Next Hint';
-        }
-    }
-
-    // Metadata Badges
+    // Progressive Metadata Badges:
+    // Hint 1: Artist
+    // Hint 2: Artist + Year
+    // Hint 3: Artist + Year + Album
+    // Hint 4: Artist + Year + Album + Track Length + Word Initials
+    // Hint 5: All above + Full 30s audio
     if (hintBadges) {
         const badges = [];
         badges.push(`<span class="meta-pill">🎤 Artist: <strong>${escapeHtml(selectedTrack.artist.name)}</strong></span>`);
-        badges.push(`<span class="meta-pill">⏱️ Length: <strong>${formatDuration(selectedTrack.duration)}</strong></span>`);
 
-        if (hintStage >= 2 && selectedTrack.album && selectedTrack.album.title) {
-            badges.push(`<span class="meta-pill highlight">💿 Album: <strong>${escapeHtml(selectedTrack.album.title)}</strong></span>`);
-        }
-
-        if (hintStage >= 3) {
+        if (hintStage >= 2) {
             if (trackExtraDetails && trackExtraDetails.release_date) {
                 const year = trackExtraDetails.release_date.split('-')[0];
                 badges.push(`<span class="meta-pill highlight">📅 Year: <strong>${escapeHtml(year)}</strong></span>`);
@@ -540,12 +544,17 @@ function updateHintsUI() {
             }
         }
 
+        if (hintStage >= 3 && selectedTrack.album && selectedTrack.album.title) {
+            badges.push(`<span class="meta-pill highlight">💿 Album: <strong>${escapeHtml(selectedTrack.album.title)}</strong></span>`);
+        }
+
         if (hintStage >= 4) {
-            badges.push(`<span class="meta-pill highlight">🔤 First letters revealed</span>`);
+            badges.push(`<span class="meta-pill highlight">⏱️ Length: <strong>${formatDuration(selectedTrack.duration)}</strong></span>`);
+            badges.push(`<span class="meta-pill highlight">🔤 Initials revealed</span>`);
         }
 
         if (hintStage >= 5) {
-            badges.push(`<span class="meta-pill highlight">🎧 Full 30s audio</span>`);
+            badges.push(`<span class="meta-pill highlight">🎧 Full 30s snippet</span>`);
         }
 
         hintBadges.innerHTML = badges.join('');
@@ -621,24 +630,19 @@ function stopSnippet() {
     }
 }
 
-function advanceHint() {
-    if (hintStage >= 5) return;
-    stopSnippet();
-    hintStage++;
-    guessCount++;
-    updateHintsUI();
-    renderMysteryTitle();
-    guessFeedback.innerHTML = `<span style="color: #4caf50;">💡 Hint ${hintStage} unlocked!</span>`;
-    guessInput.focus();
-}
-
 function handleGuess() {
     stopSnippet();
     hideSuggestions();
 
     const rawGuess = guessInput.value.trim();
     if (!rawGuess) {
-        guessFeedback.innerHTML = '<span style="color: #ff9800;">Please type a song guess or pick a suggestion!</span>';
+        if (guessInputContainer) {
+            guessInputContainer.classList.remove('shake');
+            void guessInputContainer.offsetWidth;
+            guessInputContainer.classList.add('shake');
+            setTimeout(() => guessInputContainer.classList.remove('shake'), 450);
+        }
+        guessInput.focus();
         return;
     }
 
@@ -650,28 +654,53 @@ function handleGuess() {
     guessCount++;
 
     if (userGuess === correctAnswer) {
+        attemptHistory.push('correct');
+        updateAttemptTracker();
         showFinalInfo();
         return;
     }
 
-    // Add matching letters to revealed set
-    const targetNorm = correctAnswerProcessed.toLowerCase();
-    for (const char of userGuess) {
-        if (/[a-z0-9]/i.test(char) && targetNorm.includes(char.toLowerCase())) {
-            revealedLetters.add(char.toUpperCase());
-        }
+    // Incorrect Guess
+    attemptHistory.push('wrong');
+    guessInput.value = '';
+
+    if (guessInputContainer) {
+        guessInputContainer.classList.remove('shake');
+        void guessInputContainer.offsetWidth;
+        guessInputContainer.classList.add('shake');
+        setTimeout(() => guessInputContainer.classList.remove('shake'), 450);
     }
 
     if (hintStage < 5) {
         hintStage++;
+        updateHintsUI();
+        renderMysteryTitle();
+        guessInput.focus();
+    } else {
+        // All 5 attempts exhausted
+        gaveUp = true;
+        showFinalInfo();
     }
+}
 
-    updateHintsUI();
-    renderMysteryTitle();
-
+function skipGuess() {
+    stopSnippet();
+    hideSuggestions();
     guessInput.value = '';
-    guessFeedback.innerHTML = `<span style="color: #f44336;">Incorrect! Hint ${hintStage} unlocked below.</span>`;
-    guessInput.focus();
+
+    guessCount++;
+
+    if (hintStage < 5) {
+        attemptHistory.push('skipped');
+        hintStage++;
+        updateHintsUI();
+        renderMysteryTitle();
+        guessInput.focus();
+    } else {
+        attemptHistory.push('skipped');
+        gaveUp = true;
+        showFinalInfo();
+    }
 }
 
 function showSuggestions(list) {
@@ -769,25 +798,19 @@ function generateShareText() {
     } else if (gaveUp) {
         guessLine = '🎯 Song revealed';
         emojiGrid = '🟥🟥🟥🟥🟥';
-    } else if (guessCount === 1) {
-        guessLine = '🎯 Guessed in 1 try!';
-        emojiGrid = '🟩🟩🟩🟩🟩';
-    } else if (guessCount === 2) {
-        guessLine = '🎯 Guessed in 2 tries!';
-        emojiGrid = '🟥🟩🟩🟩🟩';
-    } else if (guessCount === 3) {
-        guessLine = '🎯 Guessed in 3 tries!';
-        emojiGrid = '🟥🟥🟩🟩🟩';
-    } else if (guessCount === 4) {
-        guessLine = '🎯 Guessed in 4 tries!';
-        emojiGrid = '🟥🟥🟥🟩🟩';
-    } else if (guessCount === 5) {
-        guessLine = '🎯 Guessed in 5 tries!';
-        emojiGrid = '🟥🟥🟥🟥🟩';
     } else {
-        guessLine = `🎯 Guessed in ${guessCount} tries!`;
-        const redCount = Math.min(guessCount - 1, 5);
-        emojiGrid = '🟥'.repeat(redCount) + '🟩';
+        const tries = attemptHistory.length || guessCount || 1;
+        guessLine = tries === 1 ? '🎯 Guessed in 1 try!' : `🎯 Guessed in ${tries} tries!`;
+        const blocks = attemptHistory.map(a => {
+            if (a === 'correct') return '🟩';
+            if (a === 'wrong') return '🟥';
+            if (a === 'skipped') return '⬛';
+            return '🟥';
+        });
+        while (blocks.length < 5) {
+            blocks.push('⬜');
+        }
+        emojiGrid = blocks.join('');
     }
 
     const shareUrl = 'https://type.vincentchan.uk';
@@ -864,26 +887,28 @@ function showFinalInfo() {
     let infoHTML = `
          <div style="display: flex; align-items: flex-start;">
             <!-- Album Art Section -->
-            <div style="flex-shrink: 0; margin-right: 20px;">
-                <h3>${selectedTrack.title} <br> ${selectedTrack.artist.name}</h3>
-                <img id="album-image" src="${selectedTrack.album.cover_medium}" alt="${selectedTrack.album.title}">
-                <audio id="song-preview" controls>
+            <div style="flex-shrink: 0; margin-right: 20px; width: 250px;">
+                <h3 style="margin-bottom: 10px;">${selectedTrack.title} <br> <span style="font-size: 16px; color: #aaa; font-weight: normal;">${selectedTrack.artist.name}</span></h3>
+                <img id="album-image" src="${selectedTrack.album.cover_medium}" alt="${selectedTrack.album.title}" style="width: 250px; height: 250px; border-radius: 8px; object-fit: cover;">
+                <audio id="song-preview" controls style="width: 100%; margin-top: 12px;">
                     <source src="${selectedTrack.preview}" type="audio/mpeg">
                     Your browser does not support the audio element.
                 </audio>
+            </div>
+
+            <!-- Lyrics Section & Share Score Underneath -->
+            <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+                <div class="lyrics-box" style="margin-bottom: 10px;">
+                    <p id="display-lyrics" class="display-lyrics">
+                        ${sectionOne.replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>')}
+                        <div class="selectedLyrics">${sectionSelected.replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>')}</div>
+                        ${sectionTwo.replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>')}
+                    </p>
+                </div>
                 <div class="share-container">
                     <button id="share-score-btn" class="share-btn">📋 Share Score</button>
                     <span id="share-toast" class="share-toast" style="display: none;">Copied to clipboard!</span>
                 </div>
-            </div>
-
-            <!-- Lyrics Section -->
-            <div class="lyrics-box">
-            <p id="display-lyrics" class="display-lyrics">
-                ${sectionOne.replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>')}
-                <div class="selectedLyrics">${sectionSelected.replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>')}</div>
-                ${sectionTwo.replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>')}
-            </p>
             </div>
         </div>
     `;
@@ -920,14 +945,6 @@ function scrollToSelectedLyrics() {
     const offset = Math.max(0, (lyricsBox.clientHeight - selected.offsetHeight) / 2);
     lyricsBox.scrollTo({ top: Math.max(0, selected.offsetTop - offset), behavior: 'smooth' });
 }
-
-function giveUp() {
-    gaveUp = true;
-    stopSnippet();
-    hideSuggestions();
-    showFinalInfo();
-}
-giveUpButton.addEventListener('click', giveUp);
 
 function endGame() {
     stopWPMUpdater();
@@ -1128,8 +1145,8 @@ if (guessSubmitBtn) {
     });
 }
 
-if (nextHintBtn) {
-    nextHintBtn.addEventListener('click', advanceHint);
+if (skipBtn) {
+    skipBtn.addEventListener('click', skipGuess);
 }
 
 if (snippetPlayBtn) {
