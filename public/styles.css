@@ -994,13 +994,46 @@ h1 {
     text-align: center;
     color: grey;
     background: transparent;
-    padding: 20px 0;
+    padding: 24px 0 20px;
     width: 100%;
 }
 
-.footer a {
-    color: inherit;
-    text-decoration: underline;
+.footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 8px 16px;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+.footer-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 5px;
+    font-family: monospace;
+    font-size: 13px;
+    color: #777;
+    text-decoration: none;
+    transition: color 0.15s ease;
+}
+
+.footer-link:hover {
+    color: #fff;
+}
+
+.footer-link:focus-visible {
+    color: #fff;
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+
+.footer-icon {
+    flex-shrink: 0;
 }
 
 .artist-seo-links {
@@ -1010,7 +1043,7 @@ h1 {
     align-items: center;
     gap: 6px 12px;
     max-width: 800px;
-    margin: 0 auto 8px;
+    margin: 0 auto 12px;
     padding: 0 20px;
     font-size: 12px;
     font-family: monospace;
