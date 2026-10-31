@@ -79,6 +79,7 @@ let isSnippetPlaying = false;
 let attemptHistory = []; // stores 'wrong', 'skipped', or 'correct'
 let candidateSongs = [];
 let artistCandidateCache = {};
+const trackDetailsCache = new Map();
 let trackExtraDetails = null;
 let suggestionSelectedIndex = -1;
 let debounceSuggestTimeout = null;
@@ -91,8 +92,14 @@ let sectionSelected = "";
 // API Fetch Functions
 async function fetchLyrics(artist, track) {
     startLoadingBar();
-    const response = await fetch(`/lyrics?artist=${encodeURIComponent(artist)}&track=${encodeURIComponent(track)}`);
-    stopLoadingBar();
+    const normArtist = String(artist || '').trim().toLowerCase();
+    const normTrack = String(track || '').trim().toLowerCase();
+    let response;
+    try {
+        response = await fetch(`/lyrics?artist=${encodeURIComponent(normArtist)}&track=${encodeURIComponent(normTrack)}`);
+    } finally {
+        stopLoadingBar();
+    }
     if (!response.ok) throw new Error('Lyrics not found.');
     const data = await response.json();
     if (!data.lyrics) throw new Error('Lyrics unavailable.');
@@ -102,7 +109,8 @@ async function fetchLyrics(artist, track) {
 async function fetchArtistId(artistName) {
     // Exists because to fetchTopTracks we need their DeezerID
     // Sometimes the most popular song of the artist we search is a collab song or they are a feature, so we look at the top 5 results to guarantee we get the id of the artist we want
-    const response = await fetch(`/tracks?artist=${encodeURIComponent(artistName)}`);
+    const normArtist = String(artistName || '').trim().toLowerCase();
+    const response = await fetch(`/tracks?artist=${encodeURIComponent(normArtist)}`);
     if (!response.ok) throw new Error('Failed to fetch artist data.');
     const data = await response.json();
     if (data.data.length === 0) throw new Error('Artist not found.');
@@ -154,8 +162,6 @@ async function loadDefaultPlaylist() {
             const trackArtist = randomTrack.artist.name;
             const trackTitle = randomTrack.title;
 
-            
-
             console.log(`Trying Song: ${trackTitle} by ${trackArtist}`);
 
             try {
@@ -164,6 +170,7 @@ async function loadDefaultPlaylist() {
                 cachedSongLyrics[`${trackArtist}-${trackTitle}`] = lyrics;
 
                 selectedTrack = randomTrack;
+                hydrateSelectedTrackPreview();
                 ensureSelectedArtistCandidates();
                 typeSection = extractRandomSection(lyrics);
                 updateDisplayedText();
@@ -387,27 +394,33 @@ function updateChallengeBanner() {
 }
 
 function updateDisplayedText() {
-    const removePunctuation = !removePunctuationCheckbox.checked;
-    const removeAdlibs = !removeAdlibsCheckbox.checked;
-    const removeNumbers = !includeNumbersCheckbox.checked;
+    const removePunctuation = !(removePunctuationCheckbox && removePunctuationCheckbox.checked);
+    const removeAdlibs = !(removeAdlibsCheckbox && removeAdlibsCheckbox.checked);
+    const removeNumbers = !(includeNumbersCheckbox && includeNumbersCheckbox.checked);
     const textToDisplay = normalizeTextForTyping(typeSection, removePunctuation, removeAdlibs, removeNumbers);
     processedWords = textToDisplay.split(/\s+/).filter(Boolean);
 
-    displayText.innerHTML = processedWords
-        .map((word, index) => `<span id="word-${index}" class="word">${escapeHtml(word)}</span>`)
-        .join(' ');
-    displayText.scrollTop = 0;
+    if (displayText) {
+        displayText.innerHTML = processedWords
+            .map((word, index) => `<span id="word-${index}" class="word">${escapeHtml(word)}</span>`)
+            .join(' ');
+        displayText.scrollTop = 0;
+    }
 
     updateWordHighlight();
-    typingArea.disabled = false;
-    typingArea.focus();
+    if (typingArea) {
+        typingArea.disabled = false;
+        typingArea.focus();
+    }
 }
 
 function updateWordHighlight() {
-    displayText.querySelectorAll('.word').forEach((span, index) => {
-        span.classList.toggle('correct', index < currentWordIndex);
-        span.classList.toggle('current', index === currentWordIndex);
-    });
+    if (displayText) {
+        displayText.querySelectorAll('.word').forEach((span, index) => {
+            span.classList.toggle('correct', index < currentWordIndex);
+            span.classList.toggle('current', index === currentWordIndex);
+        });
+    }
 
     renderWordProgress(currentWordIndex, '');
     scrollCurrentWordIntoView();
@@ -416,6 +429,7 @@ function updateWordHighlight() {
 // Typeracer/Monkeytype-style feedback: colour each character of the word being typed
 // green (correct) or red (incorrect), show overflow characters, and draw a caret.
 function renderWordProgress(index, typed, showCaret = true) {
+    if (typeof document === 'undefined') return;
     const wordElement = document.getElementById(`word-${index}`);
     const word = processedWords[index];
     if (!wordElement || word === undefined) return;
@@ -440,6 +454,7 @@ function renderWordProgress(index, typed, showCaret = true) {
 
 // Keep the current word visible inside the (fixed-height) display box
 function scrollCurrentWordIntoView() {
+    if (typeof document === 'undefined' || !displayText) return;
     const wordElement = document.getElementById(`word-${currentWordIndex}`);
     if (!wordElement) return;
 
@@ -643,20 +658,64 @@ async function ensureSelectedArtistCandidates() {
     }
 }
 
+function isPreviewUrlFresh(previewUrl) {
+    if (!previewUrl || typeof previewUrl !== 'string') return false;
+    const match = /(?:^|[?&~=])exp=(\d+)/.exec(previewUrl);
+    if (!match) return true;
+    const expSeconds = parseInt(match[1], 10);
+    if (isNaN(expSeconds)) return true;
+    return expSeconds > Math.floor(Date.now() / 1000) + 60;
+}
+
+function applyTrackDetailsToActiveTrack(trackId, details) {
+    if (!details) return;
+    trackExtraDetails = details;
+    if (details.preview && selectedTrack && String(selectedTrack.id) === String(trackId)) {
+        selectedTrack.preview = details.preview;
+        if (typeof document !== 'undefined') {
+            const audioElement = document.getElementById('song-preview');
+            if (audioElement && audioElement.src !== details.preview) {
+                audioElement.src = details.preview;
+            }
+        }
+    }
+    if (guessSection && guessSection.style.display !== 'none') {
+        updateHintsUI();
+    }
+}
+
+function hydrateSelectedTrackPreview() {
+    if (!selectedTrack || !selectedTrack.id) return;
+    if (isPreviewUrlFresh(selectedTrack.preview)) return;
+    fetchTrackDetails(selectedTrack.id);
+}
+
 async function fetchTrackDetails(trackId) {
     trackExtraDetails = null;
     if (!trackId) return;
+    const cacheKey = String(trackId);
+    const cached = trackDetailsCache.get(cacheKey);
+    if (
+        cached &&
+        Date.now() - cached.fetchedAt < 9 * 60 * 1000 &&
+        (!cached.data.preview || isPreviewUrlFresh(cached.data.preview))
+    ) {
+        applyTrackDetailsToActiveTrack(trackId, cached.data);
+        return cached.data;
+    }
+
     try {
         const res = await fetch(`/track-details?trackId=${encodeURIComponent(trackId)}`);
         if (res.ok) {
-            trackExtraDetails = await res.json();
-            if (guessSection.style.display !== 'none') {
-                updateHintsUI();
-            }
+            const details = await res.json();
+            trackDetailsCache.set(cacheKey, { data: details, fetchedAt: Date.now() });
+            applyTrackDetailsToActiveTrack(trackId, details);
+            return details;
         }
     } catch (err) {
         console.warn('Could not fetch track details:', err);
     }
+    return null;
 }
 
 function startGuessingPhase() {
@@ -814,14 +873,18 @@ function updateHintsUI() {
     }
 }
 
-function playSnippet() {
-    if (!selectedTrack || !selectedTrack.preview) {
-        alert('Audio snippet preview unavailable for this track.');
+async function playSnippet() {
+    if (isSnippetPlaying) {
+        stopSnippet();
         return;
     }
 
-    if (isSnippetPlaying) {
-        stopSnippet();
+    if (selectedTrack && !isPreviewUrlFresh(selectedTrack.preview) && selectedTrack.id) {
+        await fetchTrackDetails(selectedTrack.id);
+    }
+
+    if (!selectedTrack || !selectedTrack.preview) {
+        alert('Audio snippet preview unavailable for this track.');
         return;
     }
 
@@ -1776,27 +1839,37 @@ function buildOmniboxSuggestions(query, remoteData = null) {
 
     // 1. Collect & rank matching ARTIST rows (defaulted to top)
     const artistMap = new Map();
-    const addCandidateArtist = (name, picture = '') => {
+    const addCandidateArtist = (name, picture = '', id = null) => {
         if (!name) return;
         const key = normOmnibox(name);
         if (!key) return;
         const existing = artistMap.get(key);
-        if (!existing || (!existing.picture && picture)) {
-            artistMap.set(key, { name, picture: picture || (existing ? existing.picture : '') });
+        if (!existing || (!existing.picture && picture) || (!existing.id && id)) {
+            artistMap.set(key, {
+                id: id || (existing ? existing.id : null),
+                name,
+                picture: picture || (existing ? existing.picture : '')
+            });
         }
     };
 
     CURATED_ARTIST_NAMES.forEach(name => addCandidateArtist(name));
     if (previousArtist) addCandidateArtist(previousArtist);
     if (remoteData && Array.isArray(remoteData.artists)) {
-        remoteData.artists.forEach(a => addCandidateArtist(a.name, a.picture));
+        remoteData.artists.forEach(a => addCandidateArtist(a.name, a.picture, a.id));
     }
 
     const rankedArtists = [];
     for (const cand of artistMap.values()) {
         const rank = getArtistOmniboxRank(cand.name, qNorm);
         if (rank > 0) {
-            rankedArtists.push({ type: 'artist', name: cand.name, picture: cand.picture, rank });
+            rankedArtists.push({
+                type: 'artist',
+                ...(cand.id ? { id: cand.id } : {}),
+                name: cand.name,
+                picture: cand.picture,
+                rank
+            });
         }
     }
     rankedArtists.sort((a, b) => b.rank - a.rank || a.name.localeCompare(b.name));
@@ -1898,7 +1971,7 @@ async function selectOmniboxItem(item) {
         if (startBtn) startBtn.disabled = true;
         resetGame();
         try {
-            await handleArtistSearch(item.name);
+            await handleArtistSearch(item.name, item.id || null);
             if (typingArea && !typingArea.disabled) typingArea.focus();
         } catch (error) {
             alert(error.message);
@@ -1984,6 +2057,10 @@ function triggerOmniboxAutocomplete(rawQuery) {
     }
 
     const cacheKey = normOmnibox(trimmed);
+    if (!cacheKey) {
+        hideSearchSuggestions();
+        return;
+    }
     const cachedRemote = omniboxSuggestCache.get(cacheKey) || null;
 
     // 1. Instant 0ms local render (from curated artists + loaded artistTracks + any cached query)
@@ -1994,10 +2071,10 @@ function triggerOmniboxAutocomplete(rawQuery) {
 
     if (cachedRemote) return;
 
-    // 2. Debounced fetch to Edge-cached /suggest endpoint
+    // 2. Debounced fetch to Edge-cached /suggest endpoint using normalized cacheKey so CDN hit rates stay high
     debounceOmniboxTimeout = setTimeout(async () => {
         try {
-            const res = await fetch(`/suggest?q=${encodeURIComponent(trimmed)}`);
+            const res = await fetch(`/suggest?q=${encodeURIComponent(cacheKey)}`);
             if (reqId !== omniboxRequestId || !res.ok) return;
             const data = await res.json();
             if (reqId !== omniboxRequestId) return;
@@ -2041,9 +2118,9 @@ async function resolveSearchIntent(rawInput) {
 
     // Consult cached /suggest or fetch /suggest once to distinguish Artist vs Song
     let suggestData = omniboxSuggestCache.get(qNorm) || null;
-    if (!suggestData) {
+    if (!suggestData && qNorm) {
         try {
-            const res = await fetch(`/suggest?q=${encodeURIComponent(trimmed)}`);
+            const res = await fetch(`/suggest?q=${encodeURIComponent(qNorm)}`);
             if (res.ok) {
                 suggestData = await res.json();
                 omniboxSuggestCache.set(qNorm, suggestData);
@@ -2054,7 +2131,7 @@ async function resolveSearchIntent(rawInput) {
     if (suggestData && Array.isArray(suggestData.artists)) {
         const exactArtist = suggestData.artists.find(a => normOmnibox(a.name) === qNorm);
         if (exactArtist) {
-            return { mode: 'artist', artist: exactArtist.name };
+            return { mode: 'artist', artist: exactArtist.name, artistId: exactArtist.id || null };
         }
         const prefixArtist = suggestData.artists.find(a => normOmnibox(a.name).startsWith(qNorm));
         if (prefixArtist) {
@@ -2062,7 +2139,7 @@ async function resolveSearchIntent(rawInput) {
                 ? suggestData.tracks.find(t => normOmnibox(t.title) === qNorm)
                 : null;
             if (!exactSong) {
-                return { mode: 'artist', artist: prefixArtist.name };
+                return { mode: 'artist', artist: prefixArtist.name, artistId: prefixArtist.id || null };
             }
         }
     }
@@ -2120,7 +2197,7 @@ if (startBtn) {
                 const targetArtist = intent.artist || inputValue;
                 if (artistInput) artistInput.value = targetArtist;
                 syncShelfVisibility(targetArtist);
-                await handleArtistSearch(targetArtist);
+                await handleArtistSearch(targetArtist, intent.artistId || null);
             }
             if (typingArea && !typingArea.disabled) typingArea.focus();
         } catch (error) {
@@ -2257,7 +2334,8 @@ async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = nu
 
     startLoadingBar();
     try {
-        const response = await fetch(`/tracks?artist=${encodeURIComponent(searchQuery)}`);
+        const normalizedSearchQuery = String(searchQuery || '').trim().toLowerCase();
+        const response = await fetch(`/tracks?artist=${encodeURIComponent(normalizedSearchQuery)}`);
         if (!response.ok) throw new Error('Failed to find track on Deezer.');
         const data = await response.json();
         if (!data.data || data.data.length === 0) {
@@ -2276,6 +2354,7 @@ async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = nu
         }
 
         selectedTrack = match;
+        hydrateSelectedTrackPreview();
         const lyricsArtist = (match.artist && match.artist.name) || artistName || '';
         const lyricsTrack = match.title || trackTitle || '';
 
@@ -2438,19 +2517,20 @@ if (typeof window !== 'undefined') {
 }
 
 // Button Logic
-async function handleArtistSearch(artistName) {
+async function handleArtistSearch(artistName, knownArtistId = null) {
     currentGameMode = 'artist';
     if (artistName === previousArtist && artistTracks.length > 0) {
         console.log(`Using cached tracks for artist: ${artistName}`);
     } else {
         console.log(`Fetching tracks for new artist: ${artistName}`);
 
-        const artistId = await fetchArtistId(artistName);
+        const artistId = knownArtistId || await fetchArtistId(artistName);
         if (!artistId) throw new Error('Artist not found.');
 
-        artistTracks = await fetchTopTracks(artistId);
+        artistTracks = await fetchTopTracks(artistId, 100);
         if (artistTracks.length === 0) throw new Error('No top tracks found.');
 
+        artistCandidateCache[`id:${artistId}`] = artistTracks;
         // Update the cached artist
         previousArtist = artistName;
     }
@@ -2469,6 +2549,7 @@ async function handleSongSearch(songName, preferredArtist = '', preferredTitle =
         const lyricsText = typeof cachedEntry === 'string' ? cachedEntry : cachedEntry.lyrics;
         if (cachedEntry && typeof cachedEntry === 'object' && cachedEntry.track) {
             selectedTrack = cachedEntry.track;
+            hydrateSelectedTrackPreview();
         }
         typeSection = extractRandomSection(lyricsText);
         updateDisplayedText();
@@ -2491,6 +2572,7 @@ async function handleSongSearch(songName, preferredArtist = '', preferredTitle =
             const lyrics = await fetchLyrics(trackArtist, trackTitle);
             cachedSongLyrics[cacheKey] = { lyrics, track: inMemoryTrack };
             selectedTrack = inMemoryTrack;
+            hydrateSelectedTrackPreview();
             typeSection = extractRandomSection(lyrics);
             updateDisplayedText();
             if (endGameBtn) endGameBtn.style.display = 'inline-block';
@@ -2501,7 +2583,8 @@ async function handleSongSearch(songName, preferredArtist = '', preferredTitle =
     console.log(`Fetching lyrics for new song: ${songName}`);
 
     try {
-        const response = await fetch(`/tracks?artist=${encodeURIComponent(songName)}`);
+        const normalizedQuery = songName.trim().toLowerCase();
+        const response = await fetch(`/tracks?artist=${encodeURIComponent(normalizedQuery)}`);
         const data = await response.json();
 
         if (!data.data || data.data.length === 0) throw new Error('No matching tracks found for the song.');
@@ -2527,6 +2610,7 @@ async function handleSongSearch(songName, preferredArtist = '', preferredTitle =
         cachedSongLyrics[cacheKey] = { lyrics, track: topSearchResult };
 
         selectedTrack = topSearchResult;
+        hydrateSelectedTrackPreview();
 
         typeSection = extractRandomSection(lyrics);
         updateDisplayedText();
@@ -2551,6 +2635,7 @@ async function tryFetchLyricsFromTracks(tracks) {
         try {
             lyrics = await fetchLyrics(track.artist.name, track.title);
             selectedTrack = tracks[randomIndex];
+            hydrateSelectedTrackPreview();
         } catch (error) {
             console.warn(`Lyrics not found for track: ${track.title}`);
         }
@@ -2562,7 +2647,7 @@ async function tryFetchLyricsFromTracks(tracks) {
 
     typeSection = extractRandomSection(lyrics);
     updateDisplayedText();
-    endGameBtn.style.display = 'inline-block';
+    if (endGameBtn) endGameBtn.style.display = 'inline-block';
 }
 
 // Loading Bar
@@ -2672,6 +2757,12 @@ if (typeof module !== 'undefined' && module.exports) {
         buildOmniboxSuggestions,
         resolveSearchIntent,
         omniboxSuggestCache,
+        trackDetailsCache,
+        isPreviewUrlFresh,
+        fetchTrackDetails,
+        handleArtistSearch,
+        ensureSelectedArtistCandidates,
+        playSnippet,
         _getState: () => ({
             totalKeystrokes,
             errorKeystrokes,
