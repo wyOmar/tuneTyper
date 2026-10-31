@@ -57,6 +57,43 @@ function trackDetailsCacheKey(trackId) {
     return `${CACHE_PREFIX}:track-details:${String(trackId).trim()}`;
 }
 
+const UNWANTED_ARTIST_PATTERNS = [
+    /\b(piano covers?|piano version)\b/i,
+    /\bkaraoke\b/i,
+    /\binstrumental\b/i,
+    /\bbacking tracks?\b/i,
+    /\btribute\b/i,
+    /\b(?:lullaby|rockabye)\b/i,
+    /\b(?:string quartet)\b/i,
+    /\b(?:covers? club|covers? band)\b/i
+];
+
+const UNWANTED_TITLE_PATTERNS = [
+    /\b(?:piano covers?|piano version)\b/i,
+    /\b(?:karaoke|karaoke version)\b/i,
+    /\b(?:instrumental|instrumental version)\b/i,
+    /\bbacking tracks?\b/i,
+    /\b(?:originally performed by|in the style of|tribute to)\b/i,
+    /\b(?:guitar covers?|drum covers?|bass covers?)\b/i,
+    /\b(?:lullaby version|8[- ]?bit version)\b/i,
+    /\b(?:orchestral cover|orchestral version)\b/i
+];
+
+/**
+ * Identifies instrumental, piano cover, karaoke, and tribute tracks that
+ * do not have published vocal lyrics in lyrics databases.
+ */
+function isUnwantedTrack(track) {
+    if (!track) return false;
+    const artist = (track.artist && (typeof track.artist === 'object' ? track.artist.name : track.artist)) || '';
+    const title = track.title || '';
+    const titleVersion = track.title_version || '';
+
+    if (UNWANTED_ARTIST_PATTERNS.some((p) => p.test(artist))) return true;
+    if (UNWANTED_TITLE_PATTERNS.some((p) => p.test(title) || p.test(titleVersion))) return true;
+    return false;
+}
+
 /**
  * Strips short-lived signed Deezer MP3 preview tokens (`hdnea=exp=...`) and unused fields
  * so artist/song lists and the UK Top 40 manifest can be safely cached 24/7 in Redis & Edge CDN.
@@ -342,6 +379,9 @@ module.exports = {
     topTracksCacheKey,
     trackDetailsCacheKey,
     sanitizeTrackForCache,
+    isUnwantedTrack,
+    UNWANTED_ARTIST_PATTERNS,
+    UNWANTED_TITLE_PATTERNS,
     resolveRedisConfig,
     createCacheClient,
     defaultCache

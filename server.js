@@ -22,6 +22,7 @@ const {
     topTracksCacheKey,
     trackDetailsCacheKey,
     sanitizeTrackForCache,
+    isUnwantedTrack,
     defaultCache
 } = require('./cache');
 
@@ -308,8 +309,10 @@ app.get('/tracks', async (req, res) => {
                 const rawList = (response.data && Array.isArray(response.data.data))
                     ? response.data.data
                     : [];
+                const filteredList = rawList.filter((t) => !isUnwantedTrack(t));
+                const listToUse = filteredList.length > 0 ? filteredList : rawList;
                 const data = {
-                    data: rawList.map(sanitizeTrackForCache).filter(Boolean)
+                    data: listToUse.map(sanitizeTrackForCache).filter(Boolean)
                 };
                 await defaultCache.set(key, data, TTL.TRACK_LIST_SECONDS);
                 return data;
@@ -352,6 +355,10 @@ app.get('/suggest', async (req, res) => {
                 const tracks = [];
 
                 for (const item of items) {
+                    if (isUnwantedTrack(item)) {
+                        continue;
+                    }
+
                     if (item.artist && item.artist.name) {
                         const artistKey = item.artist.name.toLowerCase();
                         if (!seenArtists.has(artistKey) && artists.length < 5) {
