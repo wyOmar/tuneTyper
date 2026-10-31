@@ -11,7 +11,7 @@ const {
     generateSitemapXml
 } = require('../artists');
 
-const { app, renderArtistHtml } = require('../server');
+const app = require('../server');
 
 // Helper for HTTP requests against the Express app
 function requestApp(server, urlPath) {
@@ -26,6 +26,14 @@ function requestApp(server, urlPath) {
         req.on('error', reject);
     });
 }
+
+test('Vercel serverless (@vercel/node) entrypoint contract', () => {
+    assert.equal(
+        typeof app,
+        'function',
+        'server.js default export (module.exports) MUST be a request handler function for @vercel/node'
+    );
+});
 
 test('Curated artist SEO metadata compliance', async (t) => {
     await t.test('All 30 curated artists satisfy Google SERP and social card length bounds', () => {
@@ -50,10 +58,15 @@ test('Curated artist SEO metadata compliance', async (t) => {
         }
     });
 
-    await t.test('resolveArtistFromSlug resolves curated names, dynamic slugs, and blocks reserved paths', () => {
+    await t.test('resolveArtistFromSlug resolves curated names, unhyphenated compact slugs, dynamic slugs, and blocks reserved paths', () => {
         const ts = resolveArtistFromSlug('taylor-swift');
         assert.equal(ts.name, 'Taylor Swift');
         assert.equal(ts.curated, true);
+
+        const compactSc = resolveArtistFromSlug('sabrinacarpenter');
+        assert.equal(compactSc.slug, 'sabrina-carpenter');
+        assert.equal(compactSc.name, 'Sabrina Carpenter');
+        assert.equal(compactSc.curated, true);
 
         const bey = resolveArtistFromSlug('beyonce');
         assert.equal(bey.name, 'Beyoncé');
@@ -120,6 +133,12 @@ test('Express SSR artist landing routes & redirects', async (t) => {
         assert.match(res.body, /id="artist-input" value="Sabrina Carpenter"/);
     });
 
+    await t.test('GET /sabrinacarpenter (unhyphenated) 301-redirects to canonical /sabrina-carpenter', async () => {
+        const res = await requestApp(server, '/sabrinacarpenter');
+        assert.equal(res.statusCode, 301);
+        assert.equal(res.headers.location, '/sabrina-carpenter');
+    });
+
     await t.test('GET /artist/taylor-swift 301-redirects to canonical /taylor-swift', async () => {
         const res = await requestApp(server, '/artist/taylor-swift');
         assert.equal(res.statusCode, 301);
@@ -137,6 +156,11 @@ test('Express SSR artist landing routes & redirects', async (t) => {
         assert.equal(res.statusCode, 200);
         assert.match(res.headers['content-type'], /xml/);
         assert.match(res.body, /<loc>https:\/\/type\.vincentchan\.uk\/sabrina-carpenter<\/loc>/);
+    });
+
+    await t.test('GET /favicon.ico returns 200', async () => {
+        const res = await requestApp(server, '/favicon.ico');
+        assert.equal(res.statusCode, 200);
     });
 
     await t.test('Reserved API routes like /tracks are not shadowed by /:slug', async () => {

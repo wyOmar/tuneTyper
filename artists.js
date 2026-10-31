@@ -32,6 +32,7 @@ const FEATURED_ARTISTS = [
 ];
 
 const ARTIST_MAP = new Map(FEATURED_ARTISTS.map(a => [a.slug, a]));
+const ARTIST_COMPACT_MAP = new Map(FEATURED_ARTISTS.map(a => [a.slug.replace(/-/g, ''), a]));
 
 const RESERVED_SLUGS = new Set([
     'tracks',
@@ -81,6 +82,11 @@ function resolveArtistFromSlug(rawSlug) {
 
     if (ARTIST_MAP.has(slug)) {
         return { ...ARTIST_MAP.get(slug), curated: true };
+    }
+
+    const compactKey = slug.replace(/-/g, '');
+    if (ARTIST_COMPACT_MAP.has(compactKey)) {
+        return { ...ARTIST_COMPACT_MAP.get(compactKey), curated: true };
     }
 
     // Dynamic fallback for valid artist-style slugs (e.g. /katy-perry, /ac-dc)
@@ -137,6 +143,102 @@ function buildArtistSeoMetadata(artist, baseUrl = 'https://type.vincentchan.uk')
     };
 }
 
+function escapeHtmlAttr(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function renderArtistHtml(artist, baseIndexHtml) {
+    const seo = buildArtistSeoMetadata(artist);
+    const safeTitle = escapeHtmlAttr(seo.title);
+    const safeDesc = escapeHtmlAttr(seo.description);
+    const safeSocialTitle = escapeHtmlAttr(seo.socialTitle);
+    const safeSocialDesc = escapeHtmlAttr(seo.socialDescription);
+    const safeKeywords = escapeHtmlAttr(seo.keywords);
+    const safeCanonical = escapeHtmlAttr(seo.canonicalUrl);
+    const safeArtistName = escapeHtmlAttr(artist.name);
+
+    const structuredData = JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'WebApplication',
+        name: seo.title,
+        url: seo.canonicalUrl,
+        applicationCategory: 'GameApplication',
+        operatingSystem: 'All',
+        description: seo.description,
+        about: {
+            '@type': 'MusicGroup',
+            name: artist.name
+        },
+        author: {
+            '@type': 'Person',
+            name: 'Vincent Chan'
+        }
+    }, null, 2);
+
+    // Safely serialize artist data for immediate client-side pre-fill
+    const bootScript = `<script>window.__INITIAL_ARTIST__ = ${JSON.stringify({
+        slug: artist.slug,
+        name: artist.name
+    }).replace(/</g, '\\u003c')};</script>`;
+
+    let html = baseIndexHtml;
+
+    html = html.replace(
+        /<link\s+rel=["']canonical["'][^>]*>/i,
+        `<link rel="canonical" href="${safeCanonical}">`
+    );
+    html = html.replace(
+        /<title>[^<]*<\/title>/i,
+        `<title>${safeTitle}</title>`
+    );
+    html = html.replace(
+        /<meta\s+name=["']description["'][^>]*>/i,
+        `<meta name="description" content="${safeDesc}">`
+    );
+    html = html.replace(
+        /<meta\s+name=["']keywords["'][^>]*>/i,
+        `<meta name="keywords" content="${safeKeywords}">`
+    );
+    html = html.replace(
+        /<meta\s+property=["']og:title["'][^>]*>/i,
+        `<meta property="og:title" content="${safeSocialTitle}">`
+    );
+    html = html.replace(
+        /<meta\s+property=["']og:description["'][^>]*>/i,
+        `<meta property="og:description" content="${safeSocialDesc}">`
+    );
+    html = html.replace(
+        /<meta\s+property=["']og:url["'][^>]*>/i,
+        `<meta property="og:url" content="${safeCanonical}">`
+    );
+    html = html.replace(
+        /<meta\s+name=["']twitter:title["'][^>]*>/i,
+        `<meta name="twitter:title" content="${safeSocialTitle}">`
+    );
+    html = html.replace(
+        /<meta\s+name=["']twitter:description["'][^>]*>/i,
+        `<meta name="twitter:description" content="${safeSocialDesc}">`
+    );
+    html = html.replace(
+        /<input\s+type=["']text["']\s+id=["']artist-input["']\s+placeholder=["']Searching for\.\.\.["']>/i,
+        `<input type="text" id="artist-input" value="${safeArtistName}" placeholder="Searching for...">`
+    );
+    html = html.replace(
+        /<script\s+id=["']structured-data["']\s+type=["']application\/ld\+json["']>[\s\S]*?<\/script>/i,
+        `<script id="structured-data" type="application/ld+json">\n${structuredData}\n    </script>`
+    );
+    html = html.replace(
+        /<script\s+src=["']\/script\.js["']><\/script>/i,
+        `${bootScript}\n    <script src="/script.js"></script>`
+    );
+
+    return html;
+}
+
 function generateSitemapXml(baseUrl = 'https://type.vincentchan.uk', lastmod = '2026-10-31') {
     const urls = [
         { loc: `${baseUrl}/`, priority: '1.0', changefreq: 'weekly' },
@@ -172,5 +274,6 @@ module.exports = {
     humanizeSlug,
     resolveArtistFromSlug,
     buildArtistSeoMetadata,
+    renderArtistHtml,
     generateSitemapXml
 };
