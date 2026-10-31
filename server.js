@@ -49,6 +49,58 @@ app.get('/tracks', async (req, res) => {
     }
 });
 
+// Lightweight Edge-cached omnibox autocomplete route (omits expiring audio preview URLs)
+app.get('/suggest', async (req, res) => {
+    const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (!q) return res.status(400).send('Query parameter q is required.');
+
+    try {
+        const response = await axios.get(`https://api.deezer.com/search?limit=20&q=${encodeURIComponent(q)}`);
+        const items = (response.data && Array.isArray(response.data.data)) ? response.data.data : [];
+
+        const seenArtists = new Set();
+        const artists = [];
+        const seenTracks = new Set();
+        const tracks = [];
+
+        for (const item of items) {
+            if (item.artist && item.artist.name) {
+                const artistKey = item.artist.name.toLowerCase();
+                if (!seenArtists.has(artistKey) && artists.length < 5) {
+                    seenArtists.add(artistKey);
+                    artists.push({
+                        id: item.artist.id,
+                        name: item.artist.name,
+                        picture: item.artist.picture_small || ''
+                    });
+                }
+            }
+
+            const rawTitle = (item.title_short || item.title || '').trim();
+            const artistName = (item.artist && item.artist.name) ? item.artist.name.trim() : '';
+            if (rawTitle && artistName) {
+                const trackKey = `${artistName.toLowerCase()}::${rawTitle.toLowerCase()}`;
+                if (!seenTracks.has(trackKey) && tracks.length < 8) {
+                    seenTracks.add(trackKey);
+                    tracks.push({
+                        id: item.id,
+                        title: rawTitle,
+                        artist: artistName,
+                        cover: (item.album && item.album.cover_small) || ''
+                    });
+                }
+            }
+        }
+
+        // Safe to cache at Vercel CDN Edge for 24h (7d SWR) since no expiring audio tokens are returned
+        res.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
+        res.json({ artists, tracks });
+    } catch (error) {
+        console.error('Error fetching search suggestions:', error.message);
+        res.status(500).send('Failed to fetch suggestions.');
+    }
+});
+
 // Deezer API: Get top tracks for an artist
 app.get('/top-tracks', async (req, res) => {
     const { artistId } = req.query;

@@ -45,17 +45,11 @@
     </div>
     
     <div class="container">
-        <div id="artist-hero-slot"></div>
-
         <div class="input-section">
-            
-            <input type="text" id="artist-input" placeholder="Searching for...">
-            <select id="search-type">
-                <option value="artist" selected>Artist</option>
-                <option value="song">Song</option>
-            </select>
-
-
+            <div class="search-omnibox-wrapper">
+                <input type="text" id="artist-input" placeholder="Search artist or song..." autocomplete="off">
+                <ul id="search-suggestions" class="search-suggestions" role="listbox" style="display: none;"></ul>
+            </div>
             <button id="start-btn">Go</button>
         </div>
 
@@ -144,6 +138,7 @@
 
         <div id="song-info" class="song-info"></div>
     </div>
+    <div id="artist-tracks-slot"></div>
     <footer class="footer">
         <nav class="artist-seo-links" aria-label="Popular artists">
             <span class="artist-seo-label">Popular Artists:</span>

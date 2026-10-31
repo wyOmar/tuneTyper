@@ -12,7 +12,7 @@ const guessSection = typeof document !== 'undefined' ? document.getElementById('
 const guessInput = typeof document !== 'undefined' ? document.getElementById('guess-input') : null;
 const guessInputContainer = typeof document !== 'undefined' ? document.querySelector('.guess-input-container') : null;
 const skipBtn = typeof document !== 'undefined' ? document.getElementById('skip-btn') : null;
-const searchTypeDropdown = typeof document !== 'undefined' ? document.getElementById('search-type') : null;
+const searchSuggestions = typeof document !== 'undefined' ? document.getElementById('search-suggestions') : null;
 const endGameBtn = typeof document !== 'undefined' ? document.getElementById('end-game-btn') : null;
 
 // Hint Elements
@@ -42,6 +42,21 @@ let previousArtist = "";
 let artistTracks = [];
 let cachedSongLyrics = {};
 let wpmInterval;
+let currentGameMode = 'artist'; // 'artist' (mystery song + guessing) | 'song' (direct practice)
+// Omnibox autocomplete state
+let omniboxItems = [];
+let omniboxSelectedIndex = -1;
+let debounceOmniboxTimeout = null;
+let omniboxRequestId = 0;
+const omniboxSuggestCache = new Map();
+const CURATED_ARTIST_NAMES = [
+    'Taylor Swift', 'Sabrina Carpenter', 'Chappell Roan', 'Olivia Rodrigo', 'Billie Eilish',
+    'Eminem', 'Kendrick Lamar', 'The Weeknd', 'Ariana Grande', 'Bruno Mars',
+    'Drake', 'Charli xcx', 'Lana Del Rey', 'Post Malone', 'Travis Scott',
+    'Dua Lipa', 'Ed Sheeran', 'Lady Gaga', 'Coldplay', 'Queen',
+    'Arctic Monkeys', 'Radiohead', 'Kanye West', 'Frank Ocean', 'Tyler, The Creator',
+    'SZA', 'Harry Styles', 'Beyoncé', 'Rihanna', 'Linkin Park'
+];
 // Deep link & Challenge variables
 let isSharedGame = false;
 let challengerWPM = null;
@@ -117,6 +132,7 @@ async function fetchTopTracks(artistId, limit = 50) {
 }
 
 async function loadDefaultPlaylist() {
+    currentGameMode = 'artist';
     try {
         const response = await fetch('/default');
         if (!response.ok) throw new Error('Failed to fetch playlist data.');
@@ -351,7 +367,6 @@ function resetGame(preserveChallenge = false) {
     if (removePunctuationCheckbox) removePunctuationCheckbox.disabled = false;
     if (removeAdlibsCheckbox) removeAdlibsCheckbox.disabled = false;
     if (includeNumbersCheckbox) includeNumbersCheckbox.disabled = false;
-    if (searchTypeDropdown) searchTypeDropdown.disabled = false;
     if (endGameBtn) endGameBtn.style.display = 'none';
 }
 
@@ -1227,12 +1242,11 @@ function generateShareText() {
     const artistName = (selectedTrack && selectedTrack.artist) ? selectedTrack.artist.name : 'Unknown';
     const acc = finalAccuracy ?? calculateAccuracy();
     const wpm = finalWPM ?? calculateWPM();
-    const searchType = searchTypeDropdown ? searchTypeDropdown.value : 'artist';
 
     let guessLine = '';
     let emojiGrid = '';
 
-    if (isSharedGame || searchType === 'song') {
+    if (isSharedGame || currentGameMode === 'song') {
         guessLine = '⚡ Direct Song Practice';
         emojiGrid = ''; // Direct search or shared game skips song guessing, no boxes to display
     } else if (gaveUp) {
@@ -1261,7 +1275,7 @@ function generateShareText() {
         num: currentNum,
         adlib: currentAdlib
     });
-    const invite = (gaveUp || isSharedGame || searchType === 'song') ? `Beat my score: ${shareUrl}` : `Can you beat me? ${shareUrl}`;
+    const invite = (gaveUp || isSharedGame || currentGameMode === 'song') ? `Beat my score: ${shareUrl}` : `Can you beat me? ${shareUrl}`;
 
     const lines = [
         '🎵 TuneTyper',
@@ -1422,9 +1436,8 @@ function showFinalInfo() {
         </div>
     `;
 
-    songInfo.innerHTML = infoHTML;
-    guessSection.style.display = 'none';
-    searchTypeDropdown.disabled = false;
+    if (songInfo) songInfo.innerHTML = infoHTML;
+    if (guessSection) guessSection.style.display = 'none';
 
     const shareBtn = document.getElementById('share-score-btn');
     if (shareBtn) {
@@ -1474,8 +1487,7 @@ function endGame() {
     if (guessSection) guessSection.style.display = 'none';
     if (endGameBtn) endGameBtn.style.display = 'none';
 
-    const searchType = searchTypeDropdown ? searchTypeDropdown.value : 'artist';
-    if (isSharedGame || searchType === "song") {
+    if (isSharedGame || currentGameMode === 'song') {
         showFinalInfo();
     } else {
         startGuessingPhase();
@@ -1501,7 +1513,6 @@ function handleTypingInput() {
         if (removePunctuationCheckbox) removePunctuationCheckbox.disabled = true;
         if (removeAdlibsCheckbox) removeAdlibsCheckbox.disabled = true;
         if (includeNumbersCheckbox) includeNumbersCheckbox.disabled = true;
-        if (searchTypeDropdown) searchTypeDropdown.disabled = true;
         startWPMUpdater();
     }
 
@@ -1551,7 +1562,6 @@ function handleTypingInput() {
 
         if (currentWordIndex === processedWords.length) {
             endGame();
-            if (searchTypeDropdown) searchTypeDropdown.disabled = false;
         }
         return;
     }
@@ -1712,34 +1722,387 @@ if (includeNumbersCheckbox) {
     });
 }
 
-if (startBtn) {
-    startBtn.addEventListener('click', async () => {
-        const inputValue = artistInput ? artistInput.value.trim() : '';
-        let searchType = searchTypeDropdown ? searchTypeDropdown.value : 'artist';
-        stopWPMUpdater();
+function normOmnibox(str) {
+    return String(str || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
 
-        if (searchType !== 'artist' && searchType !== 'song') {
-            searchType = 'artist'; // default
+function getArtistOmniboxRank(artistName, qNorm) {
+    if (!artistName || !qNorm) return 0;
+    const aNorm = normOmnibox(artistName);
+    if (!aNorm) return 0;
+    if (aNorm === qNorm) return 100;
+    if (aNorm.startsWith(qNorm)) return 85;
+    const words = aNorm.split(' ');
+    if (words.some(w => w.startsWith(qNorm))) return 70;
+    if (aNorm.includes(qNorm)) return 55;
+    return 0;
+}
+
+function getSongOmniboxRank(track, qNorm) {
+    if (!track || !track.title || !qNorm) return 0;
+    const tNorm = normOmnibox(track.title);
+    const aNorm = normOmnibox(track.artist || '');
+    if (!tNorm) return 0;
+
+    // When the query matches the artist's name, surface their songs right underneath the ARTIST row
+    if (aNorm && aNorm === qNorm) return 60;
+
+    const combined = `${aNorm} ${tNorm}`.trim();
+    const reversed = `${tNorm} ${aNorm}`.trim();
+    if (combined === qNorm || reversed === qNorm) return 98;
+    if (tNorm === qNorm) return 95;
+    if (tNorm.startsWith(qNorm)) return 82;
+
+    const qTokens = qNorm.split(' ').filter(Boolean);
+    const allTokensMatch = qTokens.every(tok =>
+        combined.split(' ').some(w => w.startsWith(tok)) || combined.includes(tok)
+    );
+    if (allTokensMatch) return 75;
+    return 0;
+}
+
+function buildOmniboxSuggestions(query, remoteData = null) {
+    const raw = String(query || '').trim();
+    if (!raw) return [];
+
+    // Strip " - " separator if user previously selected "Artist - Song"
+    const qNorm = normOmnibox(raw.replace(/\s+-\s+/g, ' '));
+    if (!qNorm) return [];
+
+    // 1. Collect & rank matching ARTIST rows (defaulted to top)
+    const artistMap = new Map();
+    const addCandidateArtist = (name, picture = '') => {
+        if (!name) return;
+        const key = normOmnibox(name);
+        if (!key) return;
+        const existing = artistMap.get(key);
+        if (!existing || (!existing.picture && picture)) {
+            artistMap.set(key, { name, picture: picture || (existing ? existing.picture : '') });
         }
+    };
 
-        if (typeof document !== 'undefined') {
-            document.querySelectorAll('.artist-track-pill.active').forEach(btn => btn.classList.remove('active'));
-            const artistHero = document.getElementById('artist-hero');
-            if (artistHero) {
-                const initialName = (typeof window !== 'undefined' && window.__INITIAL_ARTIST__ && window.__INITIAL_ARTIST__.name)
-                    ? window.__INITIAL_ARTIST__.name.toLowerCase()
-                    : '';
-                const matchesInitialArtist = Boolean(
-                    inputValue &&
-                    initialName &&
-                    searchType === 'artist' &&
-                    inputValue.toLowerCase() === initialName
-                );
-                artistHero.style.display = matchesInitialArtist ? '' : 'none';
+    CURATED_ARTIST_NAMES.forEach(name => addCandidateArtist(name));
+    if (previousArtist) addCandidateArtist(previousArtist);
+    if (remoteData && Array.isArray(remoteData.artists)) {
+        remoteData.artists.forEach(a => addCandidateArtist(a.name, a.picture));
+    }
+
+    const rankedArtists = [];
+    for (const cand of artistMap.values()) {
+        const rank = getArtistOmniboxRank(cand.name, qNorm);
+        if (rank > 0) {
+            rankedArtists.push({ type: 'artist', name: cand.name, picture: cand.picture, rank });
+        }
+    }
+    rankedArtists.sort((a, b) => b.rank - a.rank || a.name.localeCompare(b.name));
+    const topArtists = rankedArtists.slice(0, 2);
+
+    // 2. Collect & rank matching SONG rows
+    const songMap = new Map();
+    const addCandidateSong = (title, artist, cover = '') => {
+        const cleanTitle = removeParentheses(String(title || '')).trim() || String(title || '').trim();
+        const cleanArtist = String(artist || '').trim();
+        if (!cleanTitle || !cleanArtist) return;
+        const key = `${normOmnibox(cleanArtist)}::${normOmnibox(cleanTitle)}`;
+        if (!songMap.has(key)) {
+            songMap.set(key, { title: cleanTitle, artist: cleanArtist, cover: cover || '' });
+        }
+    };
+
+    if (Array.isArray(artistTracks)) {
+        artistTracks.forEach(t => {
+            if (t && t.title && t.artist && t.artist.name) {
+                addCandidateSong(t.title, t.artist.name, (t.album && t.album.cover_small) || '');
+            }
+        });
+    }
+    if (remoteData && Array.isArray(remoteData.tracks)) {
+        remoteData.tracks.forEach(t => addCandidateSong(t.title, t.artist, t.cover));
+    }
+
+    const rankedSongs = [];
+    for (const cand of songMap.values()) {
+        const rank = getSongOmniboxRank(cand, qNorm);
+        if (rank > 0) {
+            rankedSongs.push({
+                type: 'song',
+                title: cand.title,
+                artist: cand.artist,
+                cover: cand.cover,
+                rank
+            });
+        }
+    }
+    rankedSongs.sort((a, b) => b.rank - a.rank);
+
+    const maxTotal = 7;
+    const topSongs = rankedSongs.slice(0, Math.max(0, maxTotal - topArtists.length));
+    return [...topArtists, ...topSongs].sort((a, b) => {
+        if (b.rank !== a.rank) return b.rank - a.rank;
+        if (a.type !== b.type) return a.type === 'artist' ? -1 : 1;
+        return 0;
+    });
+}
+
+function syncShelfVisibility(targetArtistName) {
+    if (typeof document === 'undefined') return;
+    document.querySelectorAll('.artist-track-card.active').forEach(btn => btn.classList.remove('active'));
+    const shelf = document.getElementById('artist-tracks-shelf');
+    if (!shelf) return;
+    const initialName = (typeof window !== 'undefined' && window.__INITIAL_ARTIST__ && window.__INITIAL_ARTIST__.name)
+        ? normOmnibox(window.__INITIAL_ARTIST__.name)
+        : '';
+    const matchesInitial = Boolean(targetArtistName && initialName && normOmnibox(targetArtistName) === initialName);
+    shelf.style.display = matchesInitial ? '' : 'none';
+}
+
+function hideSearchSuggestions() {
+    clearTimeout(debounceOmniboxTimeout);
+    omniboxRequestId++;
+    omniboxItems = [];
+    omniboxSelectedIndex = -1;
+    if (searchSuggestions) {
+        searchSuggestions.style.display = 'none';
+        searchSuggestions.innerHTML = '';
+    }
+}
+
+function updateOmniboxSelectionUI() {
+    if (!searchSuggestions) return;
+    const rows = searchSuggestions.querySelectorAll('.search-suggestion-item');
+    rows.forEach((el, idx) => {
+        if (idx === omniboxSelectedIndex) {
+            el.classList.add('selected');
+            if (typeof el.scrollIntoView === 'function') {
+                el.scrollIntoView({ block: 'nearest' });
+            }
+        } else {
+            el.classList.remove('selected');
+        }
+    });
+}
+
+async function selectOmniboxItem(item) {
+    if (!item) return;
+    hideSearchSuggestions();
+    stopWPMUpdater();
+
+    if (item.type === 'artist') {
+        if (artistInput) artistInput.value = item.name;
+        syncShelfVisibility(item.name);
+        if (startBtn) startBtn.disabled = true;
+        resetGame();
+        try {
+            await handleArtistSearch(item.name);
+            if (typingArea && !typingArea.disabled) typingArea.focus();
+        } catch (error) {
+            alert(error.message);
+        } finally {
+            if (startBtn) startBtn.disabled = false;
+        }
+    } else {
+        const displayLabel = `${item.artist} - ${item.title}`;
+        if (artistInput) artistInput.value = displayLabel;
+        syncShelfVisibility(item.artist);
+        if (startBtn) startBtn.disabled = true;
+        resetGame();
+        try {
+            await handleSongSearch(`${item.artist} ${item.title}`, item.artist, item.title);
+            if (typingArea && !typingArea.disabled) typingArea.focus();
+        } catch (error) {
+            alert(error.message);
+        } finally {
+            if (startBtn) startBtn.disabled = false;
+        }
+    }
+}
+
+function renderSearchSuggestions(items) {
+    if (!searchSuggestions) return;
+    omniboxItems = items || [];
+    if (omniboxItems.length === 0) {
+        searchSuggestions.style.display = 'none';
+        searchSuggestions.innerHTML = '';
+        omniboxSelectedIndex = -1;
+        return;
+    }
+
+    omniboxSelectedIndex = 0; // Default top result highlighted so Enter selects the top ARTIST or SONG
+    searchSuggestions.innerHTML = omniboxItems.map((item, idx) => {
+        const isArtist = item.type === 'artist';
+        const thumbHtml = item.cover || item.picture
+            ? `<img src="${escapeHtml(item.cover || item.picture)}" alt="" class="search-item-thumb ${isArtist ? 'artist-thumb' : ''}" loading="lazy">`
+            : '';
+        const primary = isArtist ? escapeHtml(item.name) : escapeHtml(item.title);
+        const secondary = isArtist ? '' : `<span class="search-item-secondary">${escapeHtml(item.artist)}</span>`;
+        const badgeClass = isArtist ? 'badge-artist' : 'badge-song';
+        const badgeLabel = isArtist ? 'ARTIST' : 'SONG';
+
+        return `
+            <li class="search-suggestion-item${idx === 0 ? ' selected' : ''}" role="option" data-index="${idx}">
+                <span class="search-item-main">
+                    ${thumbHtml}
+                    <span class="search-item-text">
+                        <span class="search-item-primary">${primary}</span>
+                        ${secondary}
+                    </span>
+                </span>
+                <span class="search-item-badge ${badgeClass}">${badgeLabel}</span>
+            </li>
+        `;
+    }).join('');
+
+    searchSuggestions.style.display = 'block';
+
+    searchSuggestions.querySelectorAll('.search-suggestion-item').forEach((rowEl) => {
+        rowEl.addEventListener('mousedown', (e) => {
+            // Prevent input blur before click registers
+            e.preventDefault();
+        });
+        rowEl.addEventListener('click', () => {
+            const idx = parseInt(rowEl.getAttribute('data-index'), 10);
+            if (!isNaN(idx) && omniboxItems[idx]) {
+                selectOmniboxItem(omniboxItems[idx]);
+            }
+        });
+    });
+}
+
+function triggerOmniboxAutocomplete(rawQuery) {
+    clearTimeout(debounceOmniboxTimeout);
+    const reqId = ++omniboxRequestId;
+    const trimmed = String(rawQuery || '').trim();
+
+    if (!trimmed) {
+        hideSearchSuggestions();
+        return;
+    }
+
+    const cacheKey = normOmnibox(trimmed);
+    const cachedRemote = omniboxSuggestCache.get(cacheKey) || null;
+
+    // 1. Instant 0ms local render (from curated artists + loaded artistTracks + any cached query)
+    const immediate = buildOmniboxSuggestions(trimmed, cachedRemote);
+    if (immediate.length > 0) {
+        renderSearchSuggestions(immediate);
+    }
+
+    if (cachedRemote) return;
+
+    // 2. Debounced fetch to Edge-cached /suggest endpoint
+    debounceOmniboxTimeout = setTimeout(async () => {
+        try {
+            const res = await fetch(`/suggest?q=${encodeURIComponent(trimmed)}`);
+            if (reqId !== omniboxRequestId || !res.ok) return;
+            const data = await res.json();
+            if (reqId !== omniboxRequestId) return;
+            omniboxSuggestCache.set(cacheKey, data);
+            const merged = buildOmniboxSuggestions(trimmed, data);
+            renderSearchSuggestions(merged);
+        } catch (err) {
+            console.warn('Omnibox suggest error:', err);
+        }
+    }, 280);
+}
+
+async function resolveSearchIntent(rawInput) {
+    const trimmed = String(rawInput || '').trim();
+    if (!trimmed) return { mode: 'default' };
+
+    // Explicit "Artist - Song" format
+    if (trimmed.includes(' - ')) {
+        const [artistPart, ...songParts] = trimmed.split(' - ');
+        const songPart = songParts.join(' - ').trim();
+        if (artistPart.trim() && songPart) {
+            return {
+                mode: 'song',
+                query: `${artistPart.trim()} ${songPart}`,
+                artist: artistPart.trim(),
+                title: songPart
+            };
+        }
+    }
+
+    const qNorm = normOmnibox(trimmed);
+
+    // Exact match with current loaded artist or curated catalog -> instant Artist Mystery Mode
+    if (previousArtist && normOmnibox(previousArtist) === qNorm) {
+        return { mode: 'artist', artist: previousArtist };
+    }
+    const curatedMatch = CURATED_ARTIST_NAMES.find(name => normOmnibox(name) === qNorm);
+    if (curatedMatch) {
+        return { mode: 'artist', artist: curatedMatch };
+    }
+
+    // Consult cached /suggest or fetch /suggest once to distinguish Artist vs Song
+    let suggestData = omniboxSuggestCache.get(qNorm) || null;
+    if (!suggestData) {
+        try {
+            const res = await fetch(`/suggest?q=${encodeURIComponent(trimmed)}`);
+            if (res.ok) {
+                suggestData = await res.json();
+                omniboxSuggestCache.set(qNorm, suggestData);
+            }
+        } catch (_) {}
+    }
+
+    if (suggestData && Array.isArray(suggestData.artists)) {
+        const exactArtist = suggestData.artists.find(a => normOmnibox(a.name) === qNorm);
+        if (exactArtist) {
+            return { mode: 'artist', artist: exactArtist.name };
+        }
+        const prefixArtist = suggestData.artists.find(a => normOmnibox(a.name).startsWith(qNorm));
+        if (prefixArtist) {
+            const exactSong = Array.isArray(suggestData.tracks)
+                ? suggestData.tracks.find(t => normOmnibox(t.title) === qNorm)
+                : null;
+            if (!exactSong) {
+                return { mode: 'artist', artist: prefixArtist.name };
             }
         }
+    }
+
+    if (suggestData && Array.isArray(suggestData.tracks) && suggestData.tracks.length > 0) {
+        const topItems = buildOmniboxSuggestions(trimmed, suggestData);
+        const topSong = topItems.find(i => i.type === 'song') || suggestData.tracks[0];
+        if (topSong) {
+            return {
+                mode: 'song',
+                query: `${topSong.artist} ${topSong.title}`,
+                artist: topSong.artist,
+                title: topSong.title
+            };
+        }
+    }
+
+    // Fallback: treat as artist search
+    return { mode: 'artist', artist: trimmed };
+}
+
+if (startBtn) {
+    startBtn.addEventListener('click', async () => {
+        // If user actively arrow-navigated to a specific dropdown row, honor that selection
+        if (
+            searchSuggestions &&
+            searchSuggestions.style.display === 'block' &&
+            omniboxSelectedIndex > 0 &&
+            omniboxItems[omniboxSelectedIndex]
+        ) {
+            await selectOmniboxItem(omniboxItems[omniboxSelectedIndex]);
+            return;
+        }
+
+        const inputValue = artistInput ? artistInput.value.trim() : '';
+        hideSearchSuggestions();
+        stopWPMUpdater();
 
         if (!inputValue) {
+            syncShelfVisibility('');
             loadDefaultPlaylist();
             resetGame();
             return;
@@ -1749,13 +2112,17 @@ if (startBtn) {
         resetGame();
 
         try {
-            if (searchType === 'artist') {
-                await handleArtistSearch(inputValue);
-            } else if (searchType === 'song') {
-                await handleSongSearch(inputValue);
+            const intent = await resolveSearchIntent(inputValue);
+            if (intent.mode === 'song') {
+                syncShelfVisibility(intent.artist || '');
+                await handleSongSearch(intent.query || inputValue, intent.artist, intent.title);
             } else {
-                throw new Error('Invalid search type selected.');
+                const targetArtist = intent.artist || inputValue;
+                if (artistInput) artistInput.value = targetArtist;
+                syncShelfVisibility(targetArtist);
+                await handleArtistSearch(targetArtist);
             }
+            if (typingArea && !typingArea.disabled) typingArea.focus();
         } catch (error) {
             alert(error.message);
         } finally {
@@ -1765,10 +2132,56 @@ if (startBtn) {
 }
 
 if (artistInput) {
+    artistInput.addEventListener('input', () => {
+        triggerOmniboxAutocomplete(artistInput.value);
+    });
+
+    artistInput.addEventListener('focus', () => {
+        if (artistInput.value && artistInput.value.trim()) {
+            triggerOmniboxAutocomplete(artistInput.value);
+        }
+    });
+
     artistInput.addEventListener('keydown', function(event) {
+        const dropdownOpen = Boolean(
+            searchSuggestions &&
+            searchSuggestions.style.display === 'block' &&
+            omniboxItems.length > 0
+        );
+
+        if (dropdownOpen && event.key === 'ArrowDown') {
+            event.preventDefault();
+            omniboxSelectedIndex = (omniboxSelectedIndex + 1) % omniboxItems.length;
+            updateOmniboxSelectionUI();
+            return;
+        }
+        if (dropdownOpen && event.key === 'ArrowUp') {
+            event.preventDefault();
+            omniboxSelectedIndex = (omniboxSelectedIndex - 1 + omniboxItems.length) % omniboxItems.length;
+            updateOmniboxSelectionUI();
+            return;
+        }
+        if (event.key === 'Escape') {
+            hideSearchSuggestions();
+            return;
+        }
         if (event.key === 'Enter') {
-            event.preventDefault(); 
-            if (startBtn) startBtn.click(); 
+            event.preventDefault();
+            if (dropdownOpen && omniboxSelectedIndex >= 0 && omniboxItems[omniboxSelectedIndex]) {
+                selectOmniboxItem(omniboxItems[omniboxSelectedIndex]);
+            } else if (startBtn) {
+                startBtn.click();
+            }
+        }
+    });
+}
+
+if (typeof document !== 'undefined') {
+    document.addEventListener('click', (event) => {
+        if (!searchSuggestions || searchSuggestions.style.display === 'none') return;
+        const wrapper = artistInput && artistInput.closest ? artistInput.closest('.search-omnibox-wrapper') : null;
+        if (wrapper && !wrapper.contains(event.target)) {
+            hideSearchSuggestions();
         }
     });
 }
@@ -1776,7 +2189,6 @@ if (artistInput) {
 if (endGameBtn) {
     endGameBtn.addEventListener('click', () => {
         endGame();
-        if (searchTypeDropdown) searchTypeDropdown.disabled = false;
     });
 }
 
@@ -1818,7 +2230,7 @@ function parseChallengeParams(queryString) {
 async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = null, options = null) {
     resetGame(true);
     isSharedGame = true;
-    if (searchTypeDropdown) searchTypeDropdown.value = 'song';
+    currentGameMode = 'song';
 
     // Synchronize typing conditions so challengers play under identical conditions
     if (options) {
@@ -1839,7 +2251,7 @@ async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = nu
     if (removeAdlibsCheckbox) removeAdlibsCheckbox.disabled = true;
 
     const searchQuery = artistName ? `${artistName} ${trackTitle}` : trackTitle;
-    if (artistInput) artistInput.value = searchQuery;
+    if (artistInput) artistInput.value = artistName ? `${artistName} - ${trackTitle}` : trackTitle;
 
     updateChallengeBanner();
 
@@ -1870,7 +2282,7 @@ async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = nu
         updateChallengeBanner();
 
         const lyrics = await fetchLyrics(lyricsArtist, lyricsTrack);
-        cachedSongLyrics[`${lyricsArtist}-${lyricsTrack}`] = lyrics;
+        cachedSongLyrics[`${lyricsArtist}-${lyricsTrack}`.toLowerCase()] = { lyrics, track: match };
 
         typeSection = extractRandomSection(lyrics, 150, 300, targetStartIndex);
         updateDisplayedText();
@@ -1942,7 +2354,6 @@ async function parseAndLoadUrlParameters() {
             return true;
         } else if (parsed.artist) {
             if (artistInput) artistInput.value = parsed.artist;
-            if (searchTypeDropdown) searchTypeDropdown.value = 'artist';
             await handleArtistSearch(parsed.artist);
             return true;
         }
@@ -1951,7 +2362,6 @@ async function parseAndLoadUrlParameters() {
     const routeArtist = getArtistFromLocationPath(window.location.pathname);
     if (routeArtist) {
         if (artistInput) artistInput.value = routeArtist;
-        if (searchTypeDropdown) searchTypeDropdown.value = 'artist';
         try {
             await handleArtistSearch(routeArtist);
             return true;
@@ -1964,28 +2374,31 @@ async function parseAndLoadUrlParameters() {
     return false;
 }
 
-function bindArtistTrackPills() {
+function bindArtistTrackCards() {
     if (typeof document === 'undefined') return;
-    const pills = document.querySelectorAll('.artist-track-pill');
-    pills.forEach((pill) => {
-        pill.addEventListener('click', async () => {
-            const artist = pill.getAttribute('data-artist') || '';
-            const track = pill.getAttribute('data-track') || '';
+    const cards = document.querySelectorAll('.artist-track-card');
+    cards.forEach((card) => {
+        card.addEventListener('click', async () => {
+            const artist = card.getAttribute('data-artist') || '';
+            const track = card.getAttribute('data-track') || '';
             if (!track) return;
 
-            document.querySelectorAll('.artist-track-pill.active').forEach(btn => btn.classList.remove('active'));
-            pill.classList.add('active');
+            document.querySelectorAll('.artist-track-card.active').forEach(btn => btn.classList.remove('active'));
+            card.classList.add('active');
 
-            const query = artist ? `${artist} ${track}` : track;
-            if (artistInput) artistInput.value = artist ? `${artist} - ${track}` : track;
-            if (searchTypeDropdown) searchTypeDropdown.value = 'song';
-
+            // Intentionally keep #artist-input untouched (e.g. "Sabrina Carpenter") so clicking "Go"
+            // afterward returns cleanly to random Artist Mystery rounds instead of locking into Song mode!
+            hideSearchSuggestions();
             stopWPMUpdater();
             resetGame();
             startLoadingBar();
 
             try {
-                await handleSongSearch(query);
+                const query = artist ? `${artist} ${track}` : track;
+                await handleSongSearch(query, artist, track);
+                if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
                 if (typingArea && !typingArea.disabled) typingArea.focus();
             } catch (error) {
                 alert(error.message);
@@ -1998,7 +2411,6 @@ function bindArtistTrackPills() {
 
 if (typeof window !== 'undefined') {
     window.addEventListener('DOMContentLoaded', async () => {
-        if (artistInput) artistInput.focus();
         const titleElement = document.querySelector('.navbar-title');
         const titleText = 'TuneTyper';
         let index = 0;
@@ -2013,17 +2425,21 @@ if (typeof window !== 'undefined') {
 
         if (titleElement) titleElement.textContent = '';
         typeNavbarTitle();
-        bindArtistTrackPills();
+        bindArtistTrackCards();
 
         const loadedFromUrl = await parseAndLoadUrlParameters();
         if (!loadedFromUrl) {
+            if (artistInput) artistInput.focus();
             loadDefaultPlaylist();
+        } else if (typingArea && !typingArea.disabled) {
+            typingArea.focus();
         }
     });
 }
 
 // Button Logic
 async function handleArtistSearch(artistName) {
+    currentGameMode = 'artist';
     if (artistName === previousArtist && artistTracks.length > 0) {
         console.log(`Using cached tracks for artist: ${artistName}`);
     } else {
@@ -2043,16 +2459,43 @@ async function handleArtistSearch(artistName) {
     ensureSelectedArtistCandidates();
 }
 
-async function handleSongSearch(songName) {
+async function handleSongSearch(songName, preferredArtist = '', preferredTitle = '') {
+    currentGameMode = 'song';
     const cacheKey = songName.toLowerCase().trim();
 
     if (cachedSongLyrics[cacheKey]) {
         console.log(`Using cached lyrics for: ${songName}`);
-        typeSection = extractRandomSection(cachedSongLyrics[cacheKey]);
+        const cachedEntry = cachedSongLyrics[cacheKey];
+        const lyricsText = typeof cachedEntry === 'string' ? cachedEntry : cachedEntry.lyrics;
+        if (cachedEntry && typeof cachedEntry === 'object' && cachedEntry.track) {
+            selectedTrack = cachedEntry.track;
+        }
+        typeSection = extractRandomSection(lyricsText);
         updateDisplayedText();
-        endGameBtn.style.display = 'inline-block';
-
+        if (endGameBtn) endGameBtn.style.display = 'inline-block';
         return; 
+    }
+
+    // Zero-API optimization: reuse track metadata if already loaded in artistTracks
+    if (preferredTitle && Array.isArray(artistTracks) && artistTracks.length > 0) {
+        const targetTitleNorm = normOmnibox(preferredTitle);
+        const targetArtistNorm = preferredArtist ? normOmnibox(preferredArtist) : '';
+        const inMemoryTrack = artistTracks.find(t =>
+            t &&
+            (normOmnibox(t.title_short || t.title) === targetTitleNorm || normOmnibox(t.title) === targetTitleNorm) &&
+            (!targetArtistNorm || (t.artist && normOmnibox(t.artist.name) === targetArtistNorm))
+        );
+        if (inMemoryTrack) {
+            const trackArtist = inMemoryTrack.artist.name;
+            const trackTitle = inMemoryTrack.title;
+            const lyrics = await fetchLyrics(trackArtist, trackTitle);
+            cachedSongLyrics[cacheKey] = { lyrics, track: inMemoryTrack };
+            selectedTrack = inMemoryTrack;
+            typeSection = extractRandomSection(lyrics);
+            updateDisplayedText();
+            if (endGameBtn) endGameBtn.style.display = 'inline-block';
+            return;
+        }
     }
 
     console.log(`Fetching lyrics for new song: ${songName}`);
@@ -2061,16 +2504,27 @@ async function handleSongSearch(songName) {
         const response = await fetch(`/tracks?artist=${encodeURIComponent(songName)}`);
         const data = await response.json();
 
-        if (data.data.length === 0) throw new Error('No matching tracks found for the song.');
+        if (!data.data || data.data.length === 0) throw new Error('No matching tracks found for the song.');
 
-        const topSearchResult = data.data[0];
+        let topSearchResult = data.data[0];
+        if (preferredArtist && preferredTitle) {
+            const pArtistNorm = normOmnibox(preferredArtist);
+            const pTitleNorm = normOmnibox(preferredTitle);
+            const exact = data.data.find(t =>
+                t.artist &&
+                normOmnibox(t.artist.name) === pArtistNorm &&
+                (normOmnibox(t.title_short || t.title) === pTitleNorm || normOmnibox(t.title).includes(pTitleNorm))
+            );
+            if (exact) topSearchResult = exact;
+        }
+
         const trackArtist = topSearchResult.artist.name;
         const trackTitle = topSearchResult.title;
 
         console.log(`Top result: ${trackTitle} by ${trackArtist}`);
 
         const lyrics = await fetchLyrics(trackArtist, trackTitle);
-        cachedSongLyrics[cacheKey] = lyrics;
+        cachedSongLyrics[cacheKey] = { lyrics, track: topSearchResult };
 
         selectedTrack = topSearchResult;
 
@@ -2215,6 +2669,9 @@ if (typeof module !== 'undefined' && module.exports) {
         getSuggestionMatchRank,
         getArtistFromLocationPath,
         parseAndLoadUrlParameters,
+        buildOmniboxSuggestions,
+        resolveSearchIntent,
+        omniboxSuggestCache,
         _getState: () => ({
             totalKeystrokes,
             errorKeystrokes,
@@ -2226,6 +2683,8 @@ if (typeof module !== 'undefined' && module.exports) {
             finalWPM,
             finalAccuracy,
             isSharedGame,
+            currentGameMode,
+            previousArtist,
             challengerWPM,
             challengerAcc,
             challengeStartIndex,
@@ -2258,6 +2717,8 @@ if (typeof module !== 'undefined' && module.exports) {
             if ('finalWPM' in state) finalWPM = state.finalWPM;
             if ('finalAccuracy' in state) finalAccuracy = state.finalAccuracy;
             if ('isSharedGame' in state) isSharedGame = state.isSharedGame;
+            if ('currentGameMode' in state) currentGameMode = state.currentGameMode;
+            if ('previousArtist' in state) previousArtist = state.previousArtist;
             if ('challengerWPM' in state) challengerWPM = state.challengerWPM;
             if ('challengerAcc' in state) challengerAcc = state.challengerAcc;
             if ('challengeStartIndex' in state) challengeStartIndex = state.challengeStartIndex;
