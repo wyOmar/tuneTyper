@@ -21,10 +21,12 @@ const WARM_LOCK_KEY = `${CACHE_PREFIX}:warm-lock`;
 const TTL = {
     SUGGEST_SECONDS: 7 * 24 * 60 * 60,        // 7 days in Redis
     TRACK_LIST_SECONDS: 7 * 24 * 60 * 60,     // 7 days in Redis (preview URLs stripped)
+    LYRICS_SECONDS: 7 * 24 * 60 * 60,         // 7 days rolling cache for verified lyrics
+    PLAYLIST_PLAYABLE_SECONDS: 2 * 24 * 60 * 60, // 48 hours rolling cache for pre-warmed playlist manifests
     LYRICS_MISS_SECONDS: 24 * 60 * 60,        // 24 hours negative cache for 404 lyrics
     TRACK_DETAILS_SECONDS: 10 * 60,           // 10 mins (contains fresh signed audio preview URL)
     RAW_PLAYLIST_FALLBACK_SECONDS: 15 * 60,   // 15 mins before first cron warm completes
-    DEFAULT_L1_SECONDS: 60 * 60               // 1 hour max in warm serverless RAM for permanent keys
+    DEFAULT_L1_SECONDS: 60 * 60               // 1 hour max in warm serverless RAM for keys without explicit TTL
 };
 
 function normalizeCachePart(value) {
