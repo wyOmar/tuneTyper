@@ -3,89 +3,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-// Mock DOM elements before importing public/script.js
-const mockElements = {};
-function getOrCreateMockElement(id) {
-    if (!mockElements[id]) {
-        const classes = new Set();
-        const listeners = {};
-        mockElements[id] = {
-            id,
-            value: '',
-            checked: id === 'remove-adlibs',
-            style: {},
-            classList: {
-                add: (...names) => names.forEach(n => classes.add(n)),
-                remove: (...names) => names.forEach(n => classes.delete(n)),
-                contains: (name) => classes.has(name),
-                toggle: (name, force) => {
-                    const shouldHave = force !== undefined ? Boolean(force) : !classes.has(name);
-                    if (shouldHave) classes.add(name);
-                    else classes.delete(name);
-                    return shouldHave;
-                }
-            },
-            disabled: false,
-            textContent: '',
-            innerHTML: '',
-            scrollTop: 0,
-            offsetTop: 0,
-            offsetHeight: 24,
-            clientHeight: 100,
-            complete: true,
-            focusCalled: 0,
-            blurCalled: 0,
-            clickCalled: 0,
-            focus() { this.focusCalled++; },
-            blur() { this.blurCalled++; },
-            click() {
-                this.clickCalled++;
-                (listeners.click || []).forEach(fn => fn({ preventDefault: () => {} }));
-            },
-            addEventListener(type, fn) {
-                if (!listeners[type]) listeners[type] = [];
-                listeners[type].push(fn);
-            },
-            dispatchEvent(evt) {
-                const list = listeners[evt.type] || [];
-                list.forEach(fn => fn(evt));
-            },
-            querySelectorAll: () => [],
-            querySelector: () => null
-        };
-    }
-    return mockElements[id];
-}
-
 let coarsePointerMatches = false;
-global.navigator = { userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' };
-global.document = {
-    activeElement: null,
-    getElementById: (id) => getOrCreateMockElement(id),
-    querySelector: () => null,
-    querySelectorAll: () => [],
-    addEventListener: () => {},
-    createElement: (tag) => ({
-        tag,
-        style: {},
-        appendChild: () => {},
-        addEventListener: () => {}
-    }),
-    body: {
-        prepend: () => {},
-        appendChild: () => {},
-        removeChild: () => {}
+const { setupMockDom } = require('./helpers/dom');
+const { elements: mockElements, getOrCreateElement: getOrCreateMockElement } = setupMockDom({
+    window: {
+        matchMedia: (query) => ({
+            matches: query === '(pointer: coarse)' ? coarsePointerMatches : false
+        })
     }
-};
-
-global.window = {
-    addEventListener: () => {},
-    scrollTo: () => {},
-    scrollBy: () => {},
-    matchMedia: (query) => ({
-        matches: query === '(pointer: coarse)' ? coarsePointerMatches : false
-    })
-};
+});
 
 const script = require('../public/script.js');
 const {
@@ -345,5 +271,69 @@ test('Responsive post-game results layout & mobile UI controls', async (t) => {
         assert.match(stylesCss, /\.final-results\s*\{[\s\S]*?flex-direction:\s*column/);
         assert.match(stylesCss, /#typing-area\.lowercase-mode:not\(:placeholder-shown\)/);
         assert.match(stylesCss, /overflow-x:\s*clip/);
+    });
+});
+
+test('Footer layout and positioning validation', async (t) => {
+    await t.test('Footer does not use fixed positioning to prevent overlapping content on zoom', () => {
+        const footerBlockMatch = stylesCss.match(/\.footer\s*\{([^}]+)\}/);
+        assert.ok(footerBlockMatch, '.footer rule should exist in styles.css');
+        const footerStyles = footerBlockMatch[1];
+
+        assert.doesNotMatch(
+            footerStyles,
+            /position\s*:\s*fixed/i,
+            '.footer must not use position: fixed as it collides with content on zoomed viewports'
+        );
+    });
+
+    await t.test('Body provides full viewport height flex layout for sticky footer', () => {
+        const bodyBlockMatch = stylesCss.match(/body\s*\{([^}]+)\}/);
+        assert.ok(bodyBlockMatch, 'body rule should exist in styles.css');
+        const bodyStyles = bodyBlockMatch[1];
+
+        assert.match(bodyStyles, /min-height\s*:\s*100vh/i, 'body must have min-height: 100vh');
+        assert.match(bodyStyles, /display\s*:\s*flex/i, 'body must have display: flex');
+        assert.match(bodyStyles, /flex-direction\s*:\s*column/i, 'body must have flex-direction: column');
+    });
+
+    await t.test('Footer pushes down with margin-top: auto', () => {
+        const footerBlockMatch = stylesCss.match(/\.footer\s*\{([^}]+)\}/);
+        assert.ok(footerBlockMatch, '.footer rule should exist');
+        const footerStyles = footerBlockMatch[1];
+
+        assert.match(footerStyles, /margin-top\s*:\s*auto/i, '.footer should have margin-top: auto');
+    });
+
+    await t.test('Footer renders minimal Monkeytype-style GitHub icon + label link', () => {
+        assert.doesNotMatch(indexHtml, /View this project on/i, 'Legacy plain-text GitHub sentence should be removed');
+        assert.match(
+            indexHtml,
+            /<div class="footer-links">[\s\S]*?<a[^>]*href="https:\/\/github\.com\/wyOmar\/tuneTyper"[^>]*class="footer-link"[^>]*>[\s\S]*?<svg class="footer-icon"[\s\S]*?<span>github<\/span>[\s\S]*?<\/a>[\s\S]*?<\/div>/,
+            'Footer should render .footer-links with .footer-link, inline .footer-icon SVG, and monospace github label'
+        );
+        assert.match(indexHtml, /rel="noopener noreferrer"/, 'External GitHub link should include rel="noopener noreferrer"');
+
+        const footerLinkMatch = stylesCss.match(/\.footer-link\s*\{([^}]+)\}/);
+        assert.ok(footerLinkMatch, '.footer-link rule should exist in styles.css');
+        assert.match(footerLinkMatch[1], /font-family\s*:\s*monospace/i, '.footer-link should use monospace font');
+        assert.match(footerLinkMatch[1], /text-decoration\s*:\s*none/i, '.footer-link should not be underlined');
+    });
+
+    await t.test('Footer wraps popular artist crawl links in a collapsible <details> to prevent clutter', () => {
+        assert.match(
+            indexHtml,
+            /<details\s+class="artist-seo-collapse">[\s\S]*?<summary\s+class="artist-seo-summary">[\s\S]*?<span\s+class="artist-seo-summary-label">Popular Artists<\/span>[\s\S]*?<nav\s+class="artist-seo-links"/,
+            'Footer should wrap .artist-seo-links inside .artist-seo-collapse details and .artist-seo-summary toggle'
+        );
+        assert.doesNotMatch(
+            indexHtml,
+            /<details\s+class="artist-seo-collapse"\s+open/i,
+            'Popular artists details element should be closed by default to prevent visual clutter'
+        );
+
+        assert.ok(stylesCss.includes('.artist-seo-collapse'), '.artist-seo-collapse styles should exist');
+        assert.ok(stylesCss.includes('.artist-seo-summary'), '.artist-seo-summary styles should exist');
+        assert.ok(stylesCss.includes('.artist-seo-chevron'), '.artist-seo-chevron styles should exist');
     });
 });

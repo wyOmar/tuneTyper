@@ -1,150 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { setupMockDom, createMockElement } = require('./helpers/dom');
 
-const elements = {};
-let trackCards = [];
+const trackCards = [];
 let scrollCalls = [];
-
-function createMockClassList() {
-    const classes = new Set();
-    return {
-        add: (...names) => names.forEach((n) => classes.add(n)),
-        remove: (...names) => names.forEach((n) => classes.delete(n)),
-        toggle: (name, force) => {
-            if (force === undefined) {
-                if (classes.has(name)) {
-                    classes.delete(name);
-                    return false;
-                }
-                classes.add(name);
-                return true;
-            }
-            if (force) classes.add(name);
-            else classes.delete(name);
-            return Boolean(force);
-        },
-        contains: (name) => classes.has(name)
-    };
-}
-
-function getOrCreateElement(id) {
-    if (!elements[id]) {
-        const listeners = {};
-        elements[id] = {
-            id,
-            style: {},
-            className: '',
-            classList: createMockClassList(),
-            innerHTML: '',
-            textContent: '',
-            value: '',
-            placeholder: '',
-            src: '',
-            alt: '',
-            checked: id === 'remove-adlibs',
-            disabled: false,
-            focused: false,
-            focus() {
-                this.focused = true;
-                if (listeners.focus) {
-                    listeners.focus.forEach((fn) => fn());
-                }
-            },
-            click() {
-                if (listeners.click) {
-                    return Promise.all(listeners.click.map((fn) => fn({ preventDefault: () => {} })));
-                }
-                return Promise.resolve();
-            },
-            addEventListener(type, fn) {
-                if (!listeners[type]) listeners[type] = [];
-                listeners[type].push(fn);
-            },
-            getAttribute: () => null,
-            querySelectorAll: () => [],
-            querySelector: () => null,
-            closest: () => null,
-            offsetTop: 0,
-            offsetHeight: 30,
-            clientHeight: 200,
-            scrollTop: 0,
-            scrollTo: () => {},
-            _listeners: listeners
-        };
-    }
-    return elements[id];
-}
-
-function createTrackCard(artist, track) {
-    const listeners = {};
-    const attrs = {
-        'data-artist': artist,
-        'data-track': track
-    };
-    return {
-        classList: createMockClassList(),
-        getAttribute: (name) => attrs[name] || null,
-        addEventListener(type, fn) {
-            if (!listeners[type]) listeners[type] = [];
-            listeners[type].push(fn);
-        },
-        click() {
-            if (listeners.click) {
-                return Promise.all(listeners.click.map((fn) => fn({ preventDefault: () => {} })));
-            }
-            return Promise.resolve();
-        }
-    };
-}
-
-global.document = {
-    getElementById: (id) => getOrCreateElement(id),
-    querySelector: (sel) => {
-        if (sel === '.navbar-title') return getOrCreateElement('navbar-title');
-        if (sel === '.guess-input-container') return getOrCreateElement('guess-input-container');
-        return getOrCreateElement(sel);
-    },
-    querySelectorAll: (sel) => {
-        if (sel === '.artist-track-card') return trackCards;
-        if (sel === '.artist-track-card.active') {
-            return trackCards.filter((c) => c.classList.contains('active'));
-        }
-        return [];
-    },
-    createElement: (tag) => ({
-        tag,
-        style: {},
-        classList: createMockClassList(),
-        setAttribute: () => {},
-        appendChild: () => {},
-        addEventListener: () => {},
-        select: () => {},
-        focus: () => {}
-    }),
-    body: {
-        appendChild: () => {},
-        removeChild: () => {},
-        prepend: () => {}
-    },
-    addEventListener: () => {},
-    execCommand: () => true
-};
-
-global.window = {
-    __INITIAL_ARTIST__: { slug: 'taylor-swift', name: 'Taylor Swift' },
-    location: {
-        origin: 'https://type.vincentchan.uk',
-        pathname: '/taylor-swift',
-        search: '',
-        hash: ''
-    },
-    scrollTo: (opts) => {
-        scrollCalls.push(opts);
-    },
-    addEventListener: () => {}
-};
-
-global.getComputedStyle = () => ({ paddingTop: '10px' });
+let lyricsFetchCalls = [];
 
 const MOCK_LYRICS_CRUEL_SUMMER = [
     'Fever dream high in the quiet of the night',
@@ -164,10 +24,50 @@ const MOCK_LYRICS_ANTI_HERO = [
     'It is me hi I am the problem it is me at tea time everybody agrees'
 ].join('\n');
 
-let lyricsFetchCalls = [];
+const { getOrCreateElement } = setupMockDom({
+    trackCards,
+    scrollTo: (opts) => scrollCalls.push(opts),
+    window: {
+        __INITIAL_ARTIST__: { slug: 'taylor-swift', name: 'Taylor Swift' },
+        location: {
+            origin: 'https://type.vincentchan.uk',
+            pathname: '/taylor-swift',
+            search: '',
+            hash: ''
+        }
+    }
+});
+
+global.getComputedStyle = () => ({ paddingTop: '10px' });
+
+function createTrackCard(artist, track) {
+    const card = createMockElement(`card-${track}`, {
+        attrs: { 'data-artist': artist, 'data-track': track }
+    });
+    card.setAttribute('data-artist', artist);
+    card.setAttribute('data-track', track);
+    return card;
+}
 
 global.fetch = async (url) => {
     const urlStr = String(url);
+    if (urlStr.startsWith('/default')) {
+        return {
+            ok: true,
+            json: async () => ({
+                tracks: {
+                    data: [
+                        {
+                            id: 999,
+                            title: 'UK Chart Topper',
+                            artist: { id: 777, name: 'Chart Artist' },
+                            album: { title: 'Hits 2026', cover_medium: 'https://example.com/art.jpg' }
+                        }
+                    ]
+                }
+            })
+        };
+    }
     if (urlStr.startsWith('/lyrics?')) {
         const params = new URLSearchParams(urlStr.split('?')[1]);
         const artist = params.get('artist');
@@ -206,6 +106,84 @@ global.fetch = async (url) => {
 
 const scriptModule = require('../public/script');
 
+test('Dynamic Artist Popular Tracks Generation & UK Top 40 suppression', async (t) => {
+    await t.test('renderArtistPopularTracksShelf builds up to 5 unique cards with album covers and metadata for any artist', () => {
+        const slot = getOrCreateElement('artist-tracks-slot');
+        slot.innerHTML = '';
+
+        const mockTracks = [
+            {
+                id: 1,
+                title: 'Karma Police',
+                album: { title: 'OK Computer', cover_medium: 'https://example.com/ok.jpg' },
+                release_date: '1997-05-21'
+            },
+            {
+                id: 2,
+                title: 'Creep',
+                album: { title: 'Pablo Honey', cover_medium: 'https://example.com/pablo.jpg' },
+                release_date: '1993-02-22'
+            },
+            {
+                id: 3,
+                title: 'No Surprises',
+                album: { title: 'OK Computer', cover_medium: 'https://example.com/ok.jpg' },
+                release_date: '1997-05-21'
+            },
+            {
+                id: 4,
+                title: 'Paranoid Android',
+                album: { title: 'OK Computer', cover_medium: 'https://example.com/ok.jpg' },
+                release_date: '1997-05-21'
+            },
+            {
+                id: 5,
+                title: 'High and Dry',
+                album: { title: 'The Bends', cover_medium: 'https://example.com/bends.jpg' },
+                release_date: '1995-03-13'
+            },
+            {
+                id: 6,
+                title: 'Fake Plastic Trees',
+                album: { title: 'The Bends', cover_medium: 'https://example.com/bends.jpg' },
+                release_date: '1995-03-13'
+            }
+        ];
+
+        scriptModule.renderArtistPopularTracksShelf('Radiohead', mockTracks);
+
+        assert.ok(slot.innerHTML.includes('artist-track-card'), 'Should render artist-track-card buttons');
+        assert.ok(slot.innerHTML.includes('data-artist-name="Radiohead"'), 'Should contain data-artist-name');
+        assert.ok(slot.innerHTML.includes('Radiohead'), 'Should display artist title');
+        assert.ok(slot.innerHTML.includes('Karma Police'), 'Should include first track');
+        assert.equal(slot.innerHTML.includes('track-card-meta'), false, 'Should omit track-card-meta so titles have more room and no truncation');
+        assert.ok(slot.innerHTML.includes('Creep'), 'Should include second track');
+        assert.ok(slot.innerHTML.includes('No Surprises'), 'Should include third track');
+        assert.ok(slot.innerHTML.includes('Paranoid Android'), 'Should include fourth track');
+        assert.ok(slot.innerHTML.includes('High and Dry'), 'Should include fifth track');
+        assert.equal(slot.innerHTML.includes('Fake Plastic Trees'), false, 'Should cap shelf at exactly 5 tracks');
+    });
+
+    await t.test('loadDefaultPlaylist hides the popular tracks shelf so UK Top 40 mystery song is never given away', async () => {
+        const shelf = getOrCreateElement('artist-tracks-shelf');
+        shelf.style.display = 'block';
+
+        await scriptModule.loadDefaultPlaylist();
+        assert.equal(shelf.style.display, 'none', 'Artist tracks shelf should be hidden in UK Top 40 mode');
+    });
+
+    await t.test('syncShelfVisibility displays shelf only when targetArtistName matches the shelf artist', () => {
+        const shelf = getOrCreateElement('artist-tracks-shelf');
+        shelf.setAttribute('data-artist-name', 'Sabrina Carpenter');
+
+        scriptModule.syncShelfVisibility('Sabrina Carpenter');
+        assert.equal(shelf.style.display, '', 'Shelf should remain visible when selecting same artist');
+
+        scriptModule.syncShelfVisibility('Olivia Rodrigo');
+        assert.equal(shelf.style.display, 'none', 'Shelf should hide immediately when switching to another artist');
+    });
+});
+
 test('Popular tracks search-bar typing effect & Go replay behavior', async (t) => {
     await t.test('fakeTypeValue types from empty character-by-character into an input element', async () => {
         const mockInput = { value: '' };
@@ -241,14 +219,12 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
 
         try {
             const typingPromise = scriptModule.fakeTypeValue(mockInput, 'Sabrina Carpenter - Espresso', 4);
-            // First step immediately deletes the last character ('r')
             assert.equal(mockInput.value, 'Sabrina Carpenter - Feathe');
             frames.unshift(mockInput.value);
             await typingPromise;
 
             assert.equal(mockInput.value, 'Sabrina Carpenter - Espresso');
 
-            // Verify every single frame kept "Sabrina Carpenter - " intact!
             for (const frame of frames) {
                 assert.ok(
                     frame.startsWith('Sabrina Carpenter - '),
@@ -267,7 +243,7 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
     });
 
     await t.test('fakeTypeValue appends " - Track" directly when input already contains the artist name', async () => {
-        const mockInput = { value: 'Sabrina Carpenter' };
+        const mockInput = { value: 'Taylor Swift' };
         const frames = [];
 
         const origSetTimeout = global.setTimeout;
@@ -277,13 +253,17 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
         }, Math.min(delay, 2));
 
         try {
-            const typingPromise = scriptModule.fakeTypeValue(mockInput, 'Sabrina Carpenter - Feather', 4);
-            // Should NOT delete "Sabrina Carpenter"; first step appends space
-            assert.equal(mockInput.value, 'Sabrina Carpenter ');
+            const typingPromise = scriptModule.fakeTypeValue(mockInput, 'Taylor Swift - Cruel Summer', 4);
+            assert.equal(mockInput.value, 'Taylor Swift ');
+            frames.unshift(mockInput.value);
             await typingPromise;
-            assert.equal(mockInput.value, 'Sabrina Carpenter - Feather');
+
+            assert.equal(mockInput.value, 'Taylor Swift - Cruel Summer');
             for (const frame of frames) {
-                assert.ok(frame.startsWith('Sabrina Carpenter'), `Frame "${frame}" should never delete artist prefix`);
+                assert.ok(
+                    frame.startsWith('Taylor Swift'),
+                    `Expected frame "${frame}" to preserve artist name without deletion`
+                );
             }
         } finally {
             global.setTimeout = origSetTimeout;
@@ -293,6 +273,7 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
     await t.test('fakeTypeValue leaves input untouched with zero flicker when selecting the exact same song again', async () => {
         const mockInput = { value: 'Sabrina Carpenter - Espresso' };
         let timerScheduled = false;
+
         const origSetTimeout = global.setTimeout;
         global.setTimeout = (fn, delay) => {
             timerScheduled = true;
@@ -315,6 +296,7 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
         const startBtn = getOrCreateElement('start-btn');
         const typingArea = getOrCreateElement('typing-area');
         const shelf = getOrCreateElement('artist-tracks-shelf');
+        shelf.setAttribute('data-artist-name', 'Taylor Swift');
         shelf.style.display = '';
 
         artistInput.value = 'Taylor Swift';
@@ -322,7 +304,8 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
 
         const cruelSummerCard = createTrackCard('Taylor Swift', 'Cruel Summer');
         const antiHeroCard = createTrackCard('Taylor Swift', 'Anti-Hero');
-        trackCards = [cruelSummerCard, antiHeroCard];
+        trackCards.length = 0;
+        trackCards.push(cruelSummerCard, antiHeroCard);
 
         scriptModule._setState({
             previousArtist: 'Taylor Swift',
@@ -349,9 +332,7 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
 
         scriptModule.bindArtistTrackCards(2);
 
-        // 1. Click "Cruel Summer" on the Popular Tracks shelf
         await cruelSummerCard.click();
-        // Wait briefly for the 2ms/char typing effect to finish
         await new Promise((r) => setTimeout(r, 120));
 
         assert.equal(artistInput.value, 'Taylor Swift - Cruel Summer');
@@ -364,7 +345,6 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
         assert.equal(typingArea.disabled, false);
         assert.equal(typingArea.focused, true);
 
-        // 2. Finish or reset and press "Go" (#start-btn) -> should replay "Cruel Summer" in song mode!
         scriptModule._setState({ currentGameMode: 'artist', selectedTrack: null });
         typingArea.disabled = true;
         typingArea.focused = false;
@@ -387,16 +367,14 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
 
         const cruelSummerCard = createTrackCard('Taylor Swift', 'Cruel Summer');
         const antiHeroCard = createTrackCard('Taylor Swift', 'Anti-Hero');
-        trackCards = [cruelSummerCard, antiHeroCard];
+        trackCards.length = 0;
+        trackCards.push(cruelSummerCard, antiHeroCard);
 
-        // Use slow typing speed (80ms/char) so clicking Go immediately catches it mid-backspace
         scriptModule.bindArtistTrackCards(80);
 
         await antiHeroCard.click();
-        // Right after click resolves, smart backspace has only deleted 1 character ('r') from "Cruel Summer"
         assert.equal(artistInput.value, 'Taylor Swift - Cruel Summe');
 
-        // Clicking Go mid-animation should snap to full "Taylor Swift - Anti-Hero" and load Anti-Hero
         await startBtn.click();
 
         assert.equal(artistInput.value, 'Taylor Swift - Anti-Hero');
@@ -411,11 +389,11 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
 
         const cruelSummerCard = createTrackCard('Taylor Swift', 'Cruel Summer');
         const antiHeroCard = createTrackCard('Taylor Swift', 'Anti-Hero');
-        trackCards = [cruelSummerCard, antiHeroCard];
+        trackCards.length = 0;
+        trackCards.push(cruelSummerCard, antiHeroCard);
 
         scriptModule.bindArtistTrackCards(8);
 
-        // Start clicking Cruel Summer, then click Anti-Hero 25ms later mid-animation
         const firstClick = cruelSummerCard.click();
         await new Promise((r) => setTimeout(r, 25));
         const secondClick = antiHeroCard.click();

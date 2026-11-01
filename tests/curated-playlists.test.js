@@ -17,30 +17,8 @@ const {
     createCacheClient
 } = require('../cache');
 const clientScript = require('../public/script');
-
-function requestApp(server, urlPath, headers = {}) {
-    return new Promise((resolve, reject) => {
-        const http = require('http');
-        const addr = server.address();
-        const req = http.request(
-            {
-                hostname: '127.0.0.1',
-                port: addr.port,
-                path: urlPath,
-                method: 'GET',
-                headers
-            },
-            (res) => {
-                let body = '';
-                res.setEncoding('utf8');
-                res.on('data', (chunk) => (body += chunk));
-                res.on('end', () => resolve({ statusCode: res.statusCode, headers: res.headers, body }));
-            }
-        );
-        req.on('error', reject);
-        req.end();
-    });
-}
+const { requestApp } = require('./helpers/http');
+const { createMockElement } = require('./helpers/dom');
 
 test('Curated Playlists Registry & Metadata Verification', async (t) => {
     await t.test('Registry defines exactly 5 curated playlists with 20s Pop as default', () => {
@@ -182,18 +160,8 @@ test('Curated Playlists UI Integration & Shelf Switching', async (t) => {
     });
 
     await t.test('Client-side syncShelfVisibility displays playlists shelf when no artist is selected and hides it when artist is active', () => {
-        // Setup mock DOM elements
-        const elements = {};
-        function createMockElement(id, attrs = {}) {
-            return {
-                id,
-                style: { display: '' },
-                getAttribute: (k) => attrs[k] || null,
-                querySelectorAll: () => []
-            };
-        }
-
-        const artistShelf = createMockElement('artist-tracks-shelf', { 'data-artist-name': 'Taylor Swift' });
+        const artistShelf = createMockElement('artist-tracks-shelf', { attrs: { 'data-artist-name': 'Taylor Swift' } });
+        artistShelf.setAttribute('data-artist-name', 'Taylor Swift');
         const playlistShelf = createMockElement('curated-playlists-shelf');
 
         const doc = {

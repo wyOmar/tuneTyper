@@ -3,78 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const elements = {};
-function getOrCreateElement(id) {
-    if (!elements[id]) {
-        elements[id] = {
-            id,
-            style: {},
-            className: '',
-            classList: {
-                add: () => {},
-                remove: () => {},
-                toggle: () => {}
-            },
-            innerHTML: '',
-            textContent: '',
-            value: '',
-            src: '',
-            alt: '',
-            disabled: false,
-            focus: () => {},
-            addEventListener: () => {},
-            querySelectorAll: () => [],
-            querySelector: () => null,
-            offsetTop: 0,
-            offsetHeight: 30,
-            clientHeight: 200,
-            scrollTo: () => {}
-        };
-    }
-    return elements[id];
-}
-
-global.document = {
-    getElementById: (id) => getOrCreateElement(id),
-    querySelector: () => ({ textContent: '', classList: { remove: () => {}, add: () => {} } }),
-    querySelectorAll: () => [],
-    createElement: (tag) => ({
-        tag,
-        style: {},
-        setAttribute: () => {},
-        appendChild: () => {},
-        addEventListener: () => {},
-        select: () => {},
-        focus: () => {}
-    }),
-    body: {
-        appendChild: () => {},
-        removeChild: () => {},
-        prepend: () => {}
-    },
-    addEventListener: () => {},
-    execCommand: () => true
-};
-
-global.window = {
-    location: {
-        origin: 'https://type.vincentchan.uk',
-        pathname: '/',
-        search: ''
-    },
-    addEventListener: () => {}
-};
-
-global.Audio = class {
-    constructor() {
-        this.currentTime = 0;
-        this.volume = 1;
-        this.paused = true;
-    }
-    play() { return Promise.resolve(); }
-    pause() {}
-    addEventListener() {}
-};
+const { setupMockDom } = require('./helpers/dom');
+setupMockDom();
 
 const {
     renderMysteryTitle,
