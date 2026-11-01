@@ -1663,59 +1663,23 @@ function generateShareText() {
     const trackTitle = selectedTrack ? selectedTrack.title : 'Unknown';
     const artistName = (selectedTrack && selectedTrack.artist) ? selectedTrack.artist.name : 'Unknown';
     const isCompleted = completedTyping || (processedWords && processedWords.length > 0 && currentWordIndex >= processedWords.length);
-    const acc = isCompleted ? (finalAccuracy ?? calculateAccuracy()) : null;
     const wpm = isCompleted ? (finalWPM ?? calculateWPM()) : null;
-
-    let guessLine = '';
-    let emojiGrid = '';
-
-    if (isSharedGame || currentGameMode === 'song') {
-        guessLine = isCompleted ? '⚡ Direct Song Practice' : '';
-        emojiGrid = ''; // Direct search or shared game skips song guessing, no boxes to display
-    } else if (gaveUp) {
-        guessLine = '🎯 Song revealed';
-        emojiGrid = '🟥🟥🟥🟥🟥';
-    } else {
-        const tries = attemptHistory.length || guessCount || 1;
-        guessLine = tries === 1 ? '🎯 Guessed in 1 try!' : `🎯 Guessed in ${tries} tries!`;
-        const blocks = attemptHistory.map(a => {
-            if (a === 'correct') return '🟩';
-            if (a === 'wrong') return '🟥';
-            if (a === 'skipped') return '⬛';
-            return '🟥';
-        });
-        while (blocks.length < 5) {
-            blocks.push('⬜');
-        }
-        emojiGrid = blocks.join('');
-    }
 
     const currentPunc = removePunctuationCheckbox ? removePunctuationCheckbox.checked : false;
     const currentNum = includeNumbersCheckbox ? includeNumbersCheckbox.checked : false;
     const currentAdlib = removeAdlibsCheckbox ? removeAdlibsCheckbox.checked : true;
-    const shareUrl = generateChallengeUrl(trackTitle, artistName, wpm, acc, currentStartIndex, {
+    const shareUrl = generateChallengeUrl(trackTitle, artistName, wpm, null, currentStartIndex, {
         punc: currentPunc,
         num: currentNum,
         adlib: currentAdlib
     });
 
-    let invite = '';
-    if (!isCompleted) {
-        invite = (isSharedGame || currentGameMode === 'song' || gaveUp)
-            ? `Play here: ${shareUrl}`
-            : `Can you guess it? ${shareUrl}`;
-    } else {
-        invite = (gaveUp || isSharedGame || currentGameMode === 'song')
-            ? `Beat my score: ${shareUrl}`
-            : `Can you beat me? ${shareUrl}`;
-    }
+    const invite = isCompleted ? `Can you beat me? ${shareUrl}` : `Play here: ${shareUrl}`;
 
     const lines = [
-        '🎵 TuneTyper',
-        `🎤 "${trackTitle}" — ${artistName}`,
-        isCompleted ? `⚡ ${wpm} WPM | ${acc}% Acc` : '',
-        guessLine,
-        emojiGrid,
+        'TuneTyper',
+        `"${trackTitle}" — ${artistName}`,
+        isCompleted ? `${wpm} WPM` : '',
         invite
     ].filter(line => line && line.trim().length > 0);
 
@@ -1755,7 +1719,7 @@ async function copyShareScore() {
 
     const shareBtn = document.getElementById('share-score-btn');
     if (shareBtn) {
-        const originalText = shareBtn.textContent;
+        const originalText = shareBtn.getAttribute('data-label') || shareBtn.textContent || 'Share';
         shareBtn.textContent = copied ? '✓ Copied!' : 'Failed to copy';
         setTimeout(() => {
             shareBtn.textContent = originalText;
@@ -1768,11 +1732,10 @@ async function copyChallengeLink() {
     const artistName = (selectedTrack && selectedTrack.artist) ? selectedTrack.artist.name : '';
     const isCompleted = completedTyping || (processedWords && processedWords.length > 0 && currentWordIndex >= processedWords.length);
     const wpm = isCompleted ? (finalWPM ?? calculateWPM()) : null;
-    const acc = isCompleted ? (finalAccuracy ?? calculateAccuracy()) : null;
     const punc = removePunctuationCheckbox ? removePunctuationCheckbox.checked : false;
     const num = includeNumbersCheckbox ? includeNumbersCheckbox.checked : false;
     const adlib = removeAdlibsCheckbox ? removeAdlibsCheckbox.checked : true;
-    const url = generateChallengeUrl(trackTitle, artistName, wpm, acc, currentStartIndex, { punc, num, adlib });
+    const url = generateChallengeUrl(trackTitle, artistName, wpm, null, currentStartIndex, { punc, num, adlib });
 
     let copied = false;
 
@@ -1805,7 +1768,7 @@ async function copyChallengeLink() {
 
     const challengeBtn = document.getElementById('share-challenge-btn');
     if (challengeBtn) {
-        const originalText = challengeBtn.textContent;
+        const originalText = challengeBtn.getAttribute('data-url') || challengeBtn.title || url;
         challengeBtn.textContent = copied ? '✓ Copied!' : 'Failed to copy';
         setTimeout(() => {
             challengeBtn.textContent = originalText;
@@ -1847,6 +1810,15 @@ function showFinalInfo() {
 
     const formatLyricsHtml = (str) => String(str || '').replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>');
 
+    const currentPunc = removePunctuationCheckbox ? removePunctuationCheckbox.checked : false;
+    const currentNum = includeNumbersCheckbox ? includeNumbersCheckbox.checked : false;
+    const currentAdlib = removeAdlibsCheckbox ? removeAdlibsCheckbox.checked : true;
+    const challengeUrl = generateChallengeUrl(trackTitle, artistName, isCompleted ? finalWPM : null, null, currentStartIndex, {
+        punc: currentPunc,
+        num: currentNum,
+        adlib: currentAdlib
+    });
+
     let infoHTML = `
         ${challengeOutcomeHTML}
         <div class="final-results">
@@ -1871,9 +1843,9 @@ function showFinalInfo() {
                     </div>
                 </div>
                 <div class="share-container">
-                    <button id="share-score-btn" class="share-btn" type="button">📋 Share Score</button>
-                    <button id="share-challenge-btn" class="share-btn challenge-link-btn" type="button">Copy Link</button>
-                    <button id="play-again-btn" class="share-btn play-again-btn" type="button">↻ Next Song</button>
+                    <button id="share-score-btn" class="share-btn" type="button" data-label="Share">Share</button>
+                    <button id="share-challenge-btn" class="share-btn challenge-link-btn" type="button" data-url="${escapeHtml(challengeUrl)}" title="${escapeHtml(challengeUrl)}">${escapeHtml(challengeUrl)}</button>
+                    <button id="play-again-btn" class="share-btn play-again-btn" type="button">Next Song</button>
                 </div>
             </div>
         </div>

@@ -241,9 +241,10 @@ test.describe('Bypassing guess the song game on shared challenges', () => {
 });
 
 test.describe('Share scorecard text embeds compact challenge deep link', () => {
-    test('generateShareText produces challenge link containing ?c= token with no green boxes on shared games', () => {
+    test('generateShareText produces clean scorecard with challenge link on shared games', () => {
         _setState({
             isSharedGame: true,
+            completedTyping: true,
             selectedTrack: {
                 title: 'opposite',
                 artist: { name: 'Sabrina Carpenter' },
@@ -256,18 +257,20 @@ test.describe('Share scorecard text embeds compact challenge deep link', () => {
         });
 
         const shareText = generateShareText();
-        assert.ok(shareText.includes('🎵 TuneTyper'));
-        assert.ok(shareText.includes('🎤 "opposite" — Sabrina Carpenter'));
-        assert.ok(shareText.includes('⚡ 87 WPM | 84% Acc'));
-        assert.ok(shareText.includes('⚡ Direct Song Practice'));
-        assert.ok(shareText.includes('Beat my score: https://type.vincentchan.uk/?c='));
-        // Verify NO green boxes appear since no guessing occurred
-        assert.ok(!shareText.includes('🟩'), 'Shared game scorecard must not contain green emoji boxes');
+        assert.ok(shareText.includes('TuneTyper'));
+        assert.ok(shareText.includes('"opposite" — Sabrina Carpenter'));
+        assert.ok(shareText.includes('87 WPM'));
+        assert.ok(shareText.includes('Can you beat me? https://type.vincentchan.uk/?c='));
+        assert.ok(!shareText.includes('🎵'), 'Scorecard must not contain music note emoji');
+        assert.ok(!shareText.includes('🎤'), 'Scorecard must not contain mic emoji');
+        assert.ok(!shareText.includes('⚡'), 'Scorecard must not contain lightning emoji');
+        assert.ok(!shareText.includes('🟩'), 'Scorecard must not contain green emoji boxes');
     });
 
-    test('generateShareText includes emoji grid when song guessing actually happened', () => {
+    test('generateShareText produces clean scorecard without guessing emojis or stats for completed mystery games', () => {
         _setState({
             isSharedGame: false,
+            completedTyping: true,
             selectedTrack: {
                 title: 'Starlight',
                 artist: { name: 'Muse' },
@@ -280,12 +283,13 @@ test.describe('Share scorecard text embeds compact challenge deep link', () => {
         });
 
         const shareText = generateShareText();
-        assert.ok(shareText.includes('🎵 TuneTyper'));
-        assert.ok(shareText.includes('🎤 "Starlight" — Muse'));
-        assert.ok(shareText.includes('⚡ 92 WPM | 97% Acc'));
-        assert.ok(shareText.includes('🎯 Guessed in 1 try!'));
-        assert.ok(shareText.includes('🟩'), 'Guessed game scorecard must include emoji boxes');
-        assert.ok(shareText.includes('https://type.vincentchan.uk/?c='));
+        assert.ok(shareText.includes('TuneTyper'));
+        assert.ok(shareText.includes('"Starlight" — Muse'));
+        assert.ok(shareText.includes('92 WPM'));
+        assert.ok(shareText.includes('Can you beat me? https://type.vincentchan.uk/?c='));
+        assert.ok(!shareText.includes('Guessed in 1 try!'), 'Scorecard must omit guessing info');
+        assert.ok(!shareText.includes('🟩'), 'Scorecard must omit emoji grid');
+        assert.ok(!shareText.includes('% Acc'), 'Scorecard must omit accuracy');
     });
 });
 
@@ -353,9 +357,6 @@ test.describe('Handling early endGame (guess-only share without WPM)', () => {
 
         endGame();
 
-        // Player now guesses song correctly on 1st try
-        _setState({ attemptHistory: ['correct'] });
-
         const state = _getState();
         assert.equal(state.completedTyping, false);
         assert.equal(state.finalWPM, null);
@@ -363,13 +364,11 @@ test.describe('Handling early endGame (guess-only share without WPM)', () => {
         assert.equal(wpmResultEl.textContent, '');
 
         const shareText = generateShareText();
-        assert.ok(shareText.includes('🎵 TuneTyper'));
-        assert.ok(shareText.includes('🎤 "Unholy" — Sam Smith'));
+        assert.ok(shareText.startsWith('TuneTyper\n"Unholy" — Sam Smith\nPlay here: https://type.vincentchan.uk/?c='));
         assert.ok(!shareText.includes('WPM'), 'Share text must omit WPM when ended early');
-        assert.ok(!shareText.includes('% Acc'), 'Share text must omit accuracy when ended early');
-        assert.ok(shareText.includes('🎯 Guessed in 1 try!'));
-        assert.ok(shareText.includes('🟩⬜⬜⬜⬜'));
-        assert.ok(shareText.includes('Can you guess it? https://type.vincentchan.uk/?c='));
+        assert.ok(!shareText.includes('🎵'));
+        assert.ok(!shareText.includes('🟩'));
+        assert.ok(!shareText.includes('Guessed in'));
 
         // Verify token in URL does NOT encode challenger WPM
         const tokenMatch = shareText.match(/\?c=([A-Za-z0-9_-]+)/);
@@ -378,10 +377,9 @@ test.describe('Handling early endGame (guess-only share without WPM)', () => {
         assert.equal(decoded.track, 'Unholy');
         assert.equal(decoded.artist, 'Sam Smith');
         assert.equal(decoded.wpm, null, 'Challenger WPM must be null when ended early');
-        assert.equal(decoded.acc, null, 'Challenger Acc must be null when ended early');
     });
 
-    test('endGame when typing is 100% complete preserves WPM/Acc in share card and challenge link', () => {
+    test('endGame when typing is 100% complete preserves WPM in share card and challenge link', () => {
         resetGame(false);
         const words = ['sam', 'smith'];
         _setState({
@@ -400,21 +398,21 @@ test.describe('Handling early endGame (guess-only share without WPM)', () => {
 
         endGame();
 
-        _setState({ attemptHistory: ['correct'] });
-
         const state = _getState();
         assert.equal(state.completedTyping, true);
         assert.ok(state.finalWPM > 0);
-        assert.equal(state.finalAccuracy, 100);
 
         const shareText = generateShareText();
-        assert.ok(shareText.includes('WPM | 100% Acc'));
+        assert.ok(shareText.includes('TuneTyper\n"Unholy" — Sam Smith'));
+        assert.ok(shareText.includes(`${state.finalWPM} WPM`));
         assert.ok(shareText.includes('Can you beat me? https://type.vincentchan.uk/?c='));
+        assert.ok(!shareText.includes('🎵'));
+        assert.ok(!shareText.includes('🟩'));
+        assert.ok(!shareText.includes('% Acc'));
 
         const tokenMatch = shareText.match(/\?c=([A-Za-z0-9_-]+)/);
         const decoded = decodeChallengeToken(tokenMatch[1]);
         assert.ok(decoded.wpm > 0);
-        assert.equal(decoded.acc, 100);
     });
 
     test('showFinalInfo displays challenge incomplete outcome when player ends race early in shared challenge', () => {
@@ -454,10 +452,30 @@ test.describe('Handling early endGame (guess-only share without WPM)', () => {
         });
 
         const shareText = generateShareText();
-        assert.ok(shareText.includes('🎵 TuneTyper'));
-        assert.ok(shareText.includes('🎤 "opposite" — Sabrina Carpenter'));
+        assert.ok(shareText.startsWith('TuneTyper\n"opposite" — Sabrina Carpenter\nPlay here: https://type.vincentchan.uk/?c='));
         assert.ok(!shareText.includes('Direct Song Practice'), 'Direct song practice line must be omitted when ended early');
         assert.ok(!shareText.includes('WPM'), 'WPM line must be omitted when ended early');
-        assert.ok(shareText.includes('Play here: https://type.vincentchan.uk/?c='));
+        assert.ok(!shareText.includes('🎵'));
+    });
+
+    test('showFinalInfo renders copy link button with full truncated URL and clean Share button', () => {
+        resetGame(false);
+        const { showFinalInfo } = require('../public/script.js');
+        const songInfoEl = global.document.getElementById('song-info');
+
+        _setState({
+            completedTyping: true,
+            finalWPM: 99,
+            selectedTrack: {
+                title: 'Naked In Manhattan',
+                artist: { name: 'Chappell Roan' },
+                album: { title: 'The Rise and Fall', cover_medium: 'https://example.com/cover.jpg' }
+            }
+        });
+
+        showFinalInfo();
+
+        assert.match(songInfoEl.innerHTML, /<button id="share-score-btn"[^>]*>Share<\/button>/);
+        assert.match(songInfoEl.innerHTML, /<button id="share-challenge-btn"[^>]*title="https:\/\/type\.vincentchan\.uk\/\?c=[^"]*"[^>]*>https:\/\/type\.vincentchan\.uk\/\?c=[^<]+<\/button>/);
     });
 });
