@@ -70,10 +70,7 @@ function buildCuratedPlaylistsShelfHtml(activePlaylistId = DEFAULT_PLAYLIST_ID) 
         const activeClass = isActive ? ' active' : '';
         const safeId = playlist.id;
         const safeName = playlist.name;
-        const safeSubtitle = playlist.subtitle;
         const safeCover = playlist.cover;
-        const safeTracks = `${playlist.trackCount} Tracks`;
-        const metaText = `${safeSubtitle} \u00b7 ${safeTracks}`;
 
         return [
             `        <button type="button" class="playlist-card${activeClass}" data-playlist-id="${safeId}" data-playlist-slug="${playlist.slug}" data-playlist-name="${safeName}">`,
@@ -82,7 +79,6 @@ function buildCuratedPlaylistsShelfHtml(activePlaylistId = DEFAULT_PLAYLIST_ID) 
             `                <span class="track-card-overlay" aria-hidden="true">${isActive ? '\u2713 Active' : '\u25b6 Play'}</span>`,
             `            </span>`,
             `            <span class="track-card-title">${safeName}</span>`,
-            `            <span class="track-card-meta">${metaText}</span>`,
             `        </button>`
         ].join('\n');
     }).join('\n');

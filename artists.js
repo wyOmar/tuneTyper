@@ -1257,9 +1257,7 @@ function buildArtistTracksShelfHtml(artist) {
     const cardsHtml = tracks.map(track => {
         const safeTitle = escapeHtml(track.title);
         const safeAlbum = escapeHtml(track.album || track.title);
-        const safeYear = track.year ? escapeHtml(track.year) : "";
         const safeCover = escapeHtml(track.cover);
-        const metaText = safeYear ? `${safeAlbum} · ${safeYear}` : safeAlbum;
 
         return [
             `        <button type="button" class="artist-track-card" data-artist="${safeName}" data-track="${safeTitle}">`,
@@ -1268,7 +1266,6 @@ function buildArtistTracksShelfHtml(artist) {
             `                <span class="track-card-overlay" aria-hidden="true">▶ Type</span>`,
             `            </span>`,
             `            <span class="track-card-title">${safeTitle}</span>`,
-            `            <span class="track-card-meta">${metaText}</span>`,
             `        </button>`
         ].join("\n");
     }).join("\n");

@@ -213,7 +213,7 @@ test('Dynamic Artist Popular Tracks Generation & UK Top 40 suppression', async (
         assert.ok(slot.innerHTML.includes('data-artist-name="Radiohead"'), 'Should contain data-artist-name');
         assert.ok(slot.innerHTML.includes('Radiohead'), 'Should display artist title');
         assert.ok(slot.innerHTML.includes('Karma Police'), 'Should include first track');
-        assert.ok(slot.innerHTML.includes('OK Computer · 1997'), 'Should include album and year in metadata');
+        assert.equal(slot.innerHTML.includes('track-card-meta'), false, 'Should omit track-card-meta so titles have more room and no truncation');
         assert.ok(slot.innerHTML.includes('Creep'), 'Should include second track');
         assert.ok(slot.innerHTML.includes('No Surprises'), 'Should include third track');
         assert.ok(slot.innerHTML.includes('Paranoid Android'), 'Should include fourth track');
