@@ -70,6 +70,7 @@ let errorKeystrokes = 0;
 let previousRawTyped = '';
 let finalWPM = null;
 let finalAccuracy = null;
+let completedTyping = false;
 let gaveUp = false;
 // Hint & Snippet variables
 let hintStage = 1;
@@ -685,6 +686,7 @@ function resetGame(preserveChallenge = false) {
     previousRawTyped = '';
     finalWPM = null;
     finalAccuracy = null;
+    completedTyping = false;
     gaveUp = false;
     hintStage = 1;
     attemptHistory = [];
@@ -695,6 +697,7 @@ function resetGame(preserveChallenge = false) {
 
     if (!preserveChallenge) {
         isSharedGame = false;
+        currentGameMode = 'artist';
         challengerWPM = null;
         challengerAcc = null;
         challengeStartIndex = null;
@@ -1659,14 +1662,15 @@ function generateChallengeUrl(trackTitle, artistName, wpm, acc, startIndex, opti
 function generateShareText() {
     const trackTitle = selectedTrack ? selectedTrack.title : 'Unknown';
     const artistName = (selectedTrack && selectedTrack.artist) ? selectedTrack.artist.name : 'Unknown';
-    const acc = finalAccuracy ?? calculateAccuracy();
-    const wpm = finalWPM ?? calculateWPM();
+    const isCompleted = completedTyping || (processedWords && processedWords.length > 0 && currentWordIndex >= processedWords.length);
+    const acc = isCompleted ? (finalAccuracy ?? calculateAccuracy()) : null;
+    const wpm = isCompleted ? (finalWPM ?? calculateWPM()) : null;
 
     let guessLine = '';
     let emojiGrid = '';
 
     if (isSharedGame || currentGameMode === 'song') {
-        guessLine = '⚡ Direct Song Practice';
+        guessLine = isCompleted ? '⚡ Direct Song Practice' : '⚡ Direct Song Practice (Ended early)';
         emojiGrid = ''; // Direct search or shared game skips song guessing, no boxes to display
     } else if (gaveUp) {
         guessLine = '🎯 Song revealed';
@@ -1694,12 +1698,22 @@ function generateShareText() {
         num: currentNum,
         adlib: currentAdlib
     });
-    const invite = (gaveUp || isSharedGame || currentGameMode === 'song') ? `Beat my score: ${shareUrl}` : `Can you beat me? ${shareUrl}`;
+
+    let invite = '';
+    if (!isCompleted) {
+        invite = (isSharedGame || currentGameMode === 'song' || gaveUp)
+            ? `Play here: ${shareUrl}`
+            : `Can you guess it? ${shareUrl}`;
+    } else {
+        invite = (gaveUp || isSharedGame || currentGameMode === 'song')
+            ? `Beat my score: ${shareUrl}`
+            : `Can you beat me? ${shareUrl}`;
+    }
 
     const lines = [
         '🎵 TuneTyper',
         `🎤 "${trackTitle}" — ${artistName}`,
-        `⚡ ${wpm} WPM | ${acc}% Acc`,
+        isCompleted ? `⚡ ${wpm} WPM | ${acc}% Acc` : '',
         guessLine,
         emojiGrid,
         invite
@@ -1752,8 +1766,9 @@ async function copyShareScore() {
 async function copyChallengeLink() {
     const trackTitle = selectedTrack ? selectedTrack.title : '';
     const artistName = (selectedTrack && selectedTrack.artist) ? selectedTrack.artist.name : '';
-    const wpm = finalWPM ?? calculateWPM();
-    const acc = finalAccuracy ?? calculateAccuracy();
+    const isCompleted = completedTyping || (processedWords && processedWords.length > 0 && currentWordIndex >= processedWords.length);
+    const wpm = isCompleted ? (finalWPM ?? calculateWPM()) : null;
+    const acc = isCompleted ? (finalAccuracy ?? calculateAccuracy()) : null;
     const punc = removePunctuationCheckbox ? removePunctuationCheckbox.checked : false;
     const num = includeNumbersCheckbox ? includeNumbersCheckbox.checked : false;
     const adlib = removeAdlibsCheckbox ? removeAdlibsCheckbox.checked : true;
@@ -1802,20 +1817,25 @@ function showFinalInfo() {
     stopSnippet();
     hideSuggestions();
 
-    if (finalWPM === null || finalWPM === undefined) {
+    const isCompleted = completedTyping || (processedWords && processedWords.length > 0 && currentWordIndex >= processedWords.length);
+    if (isCompleted && (finalWPM === null || finalWPM === undefined)) {
         finalWPM = calculateWPM();
         finalAccuracy = calculateAccuracy();
     }
 
     let challengeOutcomeHTML = '';
     if (challengerWPM !== null && challengerWPM !== undefined) {
-        const diff = finalWPM - challengerWPM;
-        if (diff > 0) {
-            challengeOutcomeHTML = `<div class="challenge-outcome won">🏆 Challenge Won! You beat ${challengerWPM} WPM by +${diff} WPM (${finalWPM} vs ${challengerWPM} WPM)!</div>`;
-        } else if (diff < 0) {
-            challengeOutcomeHTML = `<div class="challenge-outcome lost">🥈 Challenge Lost! You were ${Math.abs(diff)} WPM short of the target (${finalWPM} vs ${challengerWPM} WPM).</div>`;
+        if (!isCompleted) {
+            challengeOutcomeHTML = `<div class="challenge-outcome lost">🥈 Challenge Incomplete! You ended the typing race early.</div>`;
         } else {
-            challengeOutcomeHTML = `<div class="challenge-outcome tied">🤝 Challenge Tied! You matched the target of ${finalWPM} WPM!</div>`;
+            const diff = finalWPM - challengerWPM;
+            if (diff > 0) {
+                challengeOutcomeHTML = `<div class="challenge-outcome won">🏆 Challenge Won! You beat ${challengerWPM} WPM by +${diff} WPM (${finalWPM} vs ${challengerWPM} WPM)!</div>`;
+            } else if (diff < 0) {
+                challengeOutcomeHTML = `<div class="challenge-outcome lost">🥈 Challenge Lost! You were ${Math.abs(diff)} WPM short of the target (${finalWPM} vs ${challengerWPM} WPM).</div>`;
+            } else {
+                challengeOutcomeHTML = `<div class="challenge-outcome tied">🤝 Challenge Tied! You matched the target of ${finalWPM} WPM!</div>`;
+            }
         }
     }
 
@@ -1916,9 +1936,18 @@ function endGame() {
         typingArea.disabled = true;
         typingArea.style.display = 'none';
     }
-    finalWPM = calculateWPM();
-    finalAccuracy = calculateAccuracy();
-    if (wpmResult) wpmResult.textContent = `${finalWPM} WPM | ${finalAccuracy}% ACC`;
+    const isCompleted = completedTyping || (processedWords && processedWords.length > 0 && currentWordIndex >= processedWords.length);
+    completedTyping = Boolean(isCompleted);
+
+    if (completedTyping) {
+        finalWPM = calculateWPM();
+        finalAccuracy = calculateAccuracy();
+        if (wpmResult) wpmResult.textContent = `${finalWPM} WPM | ${finalAccuracy}% ACC`;
+    } else {
+        finalWPM = null;
+        finalAccuracy = null;
+        if (wpmResult) wpmResult.textContent = '';
+    }
     //Final WPM
     if (guessSection) guessSection.style.display = 'none';
     if (endGameBtn) endGameBtn.style.display = 'none';
@@ -2002,6 +2031,7 @@ function handleTypingInput() {
         updateWordHighlight();
 
         if (currentWordIndex === processedWords.length) {
+            completedTyping = true;
             endGame();
         }
         return;
@@ -3374,6 +3404,7 @@ if (typeof module !== 'undefined' && module.exports) {
             endTime,
             finalWPM,
             finalAccuracy,
+            completedTyping,
             isSharedGame,
             currentGameMode,
             previousArtist,
@@ -3413,6 +3444,11 @@ if (typeof module !== 'undefined' && module.exports) {
             if ('endTime' in state) endTime = state.endTime;
             if ('finalWPM' in state) finalWPM = state.finalWPM;
             if ('finalAccuracy' in state) finalAccuracy = state.finalAccuracy;
+            if ('completedTyping' in state) {
+                completedTyping = state.completedTyping;
+            } else if ('finalWPM' in state && state.finalWPM !== null) {
+                completedTyping = true;
+            }
             if ('isSharedGame' in state) isSharedGame = state.isSharedGame;
             if ('currentGameMode' in state) currentGameMode = state.currentGameMode;
             if ('previousArtist' in state) previousArtist = state.previousArtist;

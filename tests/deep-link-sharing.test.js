@@ -330,3 +330,111 @@ test.describe('Synchronizing typing conditions for shared games', () => {
         assert.equal(state.removeAdlibsCheckbox.disabled, true);
     });
 });
+
+test.describe('Handling early endGame (guess-only share without WPM)', () => {
+    test('endGame when ended early clears WPM/Acc, omits typing line from share card, and strips challenger WPM from link', () => {
+        resetGame(false);
+        const wpmResultEl = global.document.getElementById('wpm-result');
+        if (wpmResultEl) wpmResultEl.textContent = '65 WPM';
+
+        _setState({
+            isSharedGame: false,
+            processedWords: ['sam', 'smith', 'kim', 'petras', 'mummy', 'dont', 'know', 'daddys'],
+            currentWordIndex: 2, // Only typed 2 out of 8 words before clicking End Game
+            totalKeystrokes: 10,
+            errorKeystrokes: 1,
+            startTime: new Date(Date.now() - 5000),
+            selectedTrack: {
+                title: 'Unholy',
+                artist: { name: 'Sam Smith' },
+                album: { title: 'Gloria', cover_medium: 'https://example.com/unholy.jpg' }
+            }
+        });
+
+        endGame();
+
+        // Player now guesses song correctly on 1st try
+        _setState({ attemptHistory: ['correct'] });
+
+        const state = _getState();
+        assert.equal(state.completedTyping, false);
+        assert.equal(state.finalWPM, null);
+        assert.equal(state.finalAccuracy, null);
+        assert.equal(wpmResultEl.textContent, '');
+
+        const shareText = generateShareText();
+        assert.ok(shareText.includes('🎵 TuneTyper'));
+        assert.ok(shareText.includes('🎤 "Unholy" — Sam Smith'));
+        assert.ok(!shareText.includes('WPM'), 'Share text must omit WPM when ended early');
+        assert.ok(!shareText.includes('% Acc'), 'Share text must omit accuracy when ended early');
+        assert.ok(shareText.includes('🎯 Guessed in 1 try!'));
+        assert.ok(shareText.includes('🟩⬜⬜⬜⬜'));
+        assert.ok(shareText.includes('Can you guess it? https://type.vincentchan.uk/?c='));
+
+        // Verify token in URL does NOT encode challenger WPM
+        const tokenMatch = shareText.match(/\?c=([A-Za-z0-9_-]+)/);
+        assert.ok(tokenMatch, 'Share text must contain ?c= challenge link');
+        const decoded = decodeChallengeToken(tokenMatch[1]);
+        assert.equal(decoded.track, 'Unholy');
+        assert.equal(decoded.artist, 'Sam Smith');
+        assert.equal(decoded.wpm, null, 'Challenger WPM must be null when ended early');
+        assert.equal(decoded.acc, null, 'Challenger Acc must be null when ended early');
+    });
+
+    test('endGame when typing is 100% complete preserves WPM/Acc in share card and challenge link', () => {
+        resetGame(false);
+        const words = ['sam', 'smith'];
+        _setState({
+            isSharedGame: false,
+            processedWords: words,
+            currentWordIndex: 2, // Typed all words
+            totalKeystrokes: 9,
+            errorKeystrokes: 0,
+            startTime: new Date(Date.now() - 3000),
+            selectedTrack: {
+                title: 'Unholy',
+                artist: { name: 'Sam Smith' },
+                album: { title: 'Gloria', cover_medium: 'https://example.com/unholy.jpg' }
+            }
+        });
+
+        endGame();
+
+        _setState({ attemptHistory: ['correct'] });
+
+        const state = _getState();
+        assert.equal(state.completedTyping, true);
+        assert.ok(state.finalWPM > 0);
+        assert.equal(state.finalAccuracy, 100);
+
+        const shareText = generateShareText();
+        assert.ok(shareText.includes('WPM | 100% Acc'));
+        assert.ok(shareText.includes('Can you beat me? https://type.vincentchan.uk/?c='));
+
+        const tokenMatch = shareText.match(/\?c=([A-Za-z0-9_-]+)/);
+        const decoded = decodeChallengeToken(tokenMatch[1]);
+        assert.ok(decoded.wpm > 0);
+        assert.equal(decoded.acc, 100);
+    });
+
+    test('showFinalInfo displays challenge incomplete outcome when player ends race early in shared challenge', () => {
+        resetGame(true);
+        const { showFinalInfo } = require('../public/script.js');
+        const songInfoEl = global.document.getElementById('song-info');
+
+        _setState({
+            isSharedGame: true,
+            challengerWPM: 75,
+            completedTyping: false,
+            selectedTrack: {
+                title: 'Unholy',
+                artist: { name: 'Sam Smith' },
+                album: { title: 'Gloria', cover_medium: 'https://example.com/unholy.jpg' }
+            }
+        });
+
+        showFinalInfo();
+
+        assert.ok(songInfoEl.innerHTML.includes('Challenge Incomplete! You ended the typing race early.'));
+    });
+});
