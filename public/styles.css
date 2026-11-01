@@ -1186,6 +1186,74 @@ h1 {
     flex-shrink: 0;
 }
 
+.artist-seo-collapse {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 0 auto 10px;
+    max-width: 800px;
+}
+
+.artist-seo-summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 12px;
+    color: #777;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.artist-seo-summary::-webkit-details-marker {
+    display: none;
+}
+
+.artist-seo-summary:hover {
+    color: #e0e0e0;
+    border-color: #555;
+    background: #252525;
+}
+
+.artist-seo-summary:focus-visible {
+    outline: 2px solid #4caf50;
+    outline-offset: 2px;
+}
+
+.artist-seo-summary-label {
+    letter-spacing: 0.02em;
+}
+
+.artist-seo-badge {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: #2a2a2a;
+    color: #888;
+    border: 1px solid #383838;
+}
+
+.artist-seo-chevron {
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
+}
+
+.artist-seo-collapse[open] .artist-seo-chevron {
+    transform: rotate(180deg);
+}
+
+.artist-seo-collapse[open] .artist-seo-summary {
+    color: #4caf50;
+    border-color: #4caf50;
+    margin-bottom: 8px;
+}
+
 .artist-seo-links {
     display: flex;
     flex-wrap: wrap;
@@ -1193,8 +1261,8 @@ h1 {
     align-items: center;
     gap: 6px 12px;
     max-width: 800px;
-    margin: 0 auto 12px;
-    padding: 0 20px;
+    margin: 0 auto;
+    padding: 6px 20px 4px;
     font-size: 12px;
     font-family: monospace;
     color: #666;

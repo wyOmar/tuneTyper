@@ -53,4 +53,21 @@ test('Footer layout and positioning validation', async (t) => {
         assert.match(footerLinkMatch[1], /font-family\s*:\s*monospace/i, '.footer-link should use monospace font');
         assert.match(footerLinkMatch[1], /text-decoration\s*:\s*none/i, '.footer-link should not be underlined');
     });
+
+    await t.test('Footer wraps popular artist crawl links in a collapsible <details> to prevent clutter', () => {
+        assert.match(
+            html,
+            /<details\s+class="artist-seo-collapse">[\s\S]*?<summary\s+class="artist-seo-summary">[\s\S]*?<span\s+class="artist-seo-summary-label">Popular Artists<\/span>[\s\S]*?<nav\s+class="artist-seo-links"/,
+            'Footer should wrap .artist-seo-links inside .artist-seo-collapse details and .artist-seo-summary toggle'
+        );
+        assert.doesNotMatch(
+            html,
+            /<details\s+class="artist-seo-collapse"\s+open/i,
+            'Popular artists details element should be closed by default to prevent visual clutter'
+        );
+
+        assert.ok(css.includes('.artist-seo-collapse'), '.artist-seo-collapse styles should exist');
+        assert.ok(css.includes('.artist-seo-summary'), '.artist-seo-summary styles should exist');
+        assert.ok(css.includes('.artist-seo-chevron'), '.artist-seo-chevron styles should exist');
+    });
 });
