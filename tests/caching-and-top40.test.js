@@ -274,7 +274,9 @@ test('Express Edge headers, read-through lyrics/Deezer caching & 24/7 UK Top 40 
         assert.equal(navRes.headers['location'], '/');
 
         // 2. Direct curl/browser access without X-Requested-With header returns 403 Forbidden
-        const directRes = await requestApp(server, '/lyrics?artist=Sabrina%20Carpenter&track=Opposite');
+        const directRes = await requestApp(server, '/lyrics?artist=Sabrina%20Carpenter&track=Opposite', {
+            skipAppHeader: true
+        });
         assert.equal(directRes.statusCode, 403);
         const directBody = JSON.parse(directRes.body);
         assert.match(directBody.error, /direct API access is disabled/i);

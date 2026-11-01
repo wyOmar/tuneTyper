@@ -139,6 +139,47 @@ test('Express Curated Playlists Routes & Redis Caching', async (t) => {
         assert.equal(dataRoute.playlist.id, '1306931615');
         assert.equal(dataRoute.tracks.data[0].title, 'Back In Black');
     });
+
+    await t.test('GET /default and /playlist/:id guard against direct browser navigation and omit bulk lyrics from response', async () => {
+        const testCache = app._cache;
+        const key = playlistPlayableKey('13650203641');
+        await testCache.set(key, {
+            updatedAt: '2026-10-31T23:00:00Z',
+            tracks: [
+                {
+                    id: 1703487577,
+                    title: 'As It Was',
+                    artist: { id: 5313805, name: 'Harry Styles' },
+                    lyrics: '[Intro]\nCome on, Harry, we wanna say goodnight to you\nHoldin me back...'
+                }
+            ]
+        });
+
+        // 1. Direct browser URL paste (Sec-Fetch-Dest: document) redirects to homepage
+        const navRes = await requestApp(server, '/default?id=13650203641', {
+            headers: {
+                'sec-fetch-dest': 'document',
+                'sec-fetch-mode': 'navigate',
+                'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            }
+        });
+        assert.equal(navRes.statusCode, 302);
+        assert.equal(navRes.headers['location'], '/');
+
+        // 2. Direct curl/browser access without X-Requested-With header returns 403 Forbidden
+        const unauthRes = await requestApp(server, '/default?id=13650203641', {
+            skipAppHeader: true
+        });
+        assert.equal(unauthRes.statusCode, 403);
+        assert.match(JSON.parse(unauthRes.body).error, /direct API access is disabled/i);
+
+        // 3. Authorized request succeeds and confirms embedded lyrics are stripped from the track payload
+        const authRes = await requestApp(server, '/default?id=13650203641');
+        assert.equal(authRes.statusCode, 200);
+        const authBody = JSON.parse(authRes.body);
+        assert.equal(authBody.tracks.data[0].title, 'As It Was');
+        assert.equal(authBody.tracks.data[0].lyrics, undefined, 'Bulk song lyrics must be stripped from playlist payload');
+    });
 });
 
 test('Curated Playlists UI Integration & Shelf Switching', async (t) => {

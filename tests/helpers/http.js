@@ -19,12 +19,18 @@ function requestApp(target, urlPath, optionsOrHeaders = {}) {
         let headers = {};
         let body = undefined;
 
-        if (optionsOrHeaders.headers || optionsOrHeaders.method || optionsOrHeaders.body) {
+        if (optionsOrHeaders.headers || optionsOrHeaders.method || optionsOrHeaders.body || optionsOrHeaders.skipAppHeader) {
             method = optionsOrHeaders.method || 'GET';
-            headers = optionsOrHeaders.headers || {};
+            headers = Object.assign({}, optionsOrHeaders.headers || {});
+            if (!optionsOrHeaders.skipAppHeader && !headers['x-requested-with'] && headers['x-requested-with'] !== null) {
+                headers['x-requested-with'] = 'TuneTyper';
+            }
+            if (headers['x-requested-with'] === null) {
+                delete headers['x-requested-with'];
+            }
             body = optionsOrHeaders.body;
         } else {
-            headers = optionsOrHeaders;
+            headers = Object.assign({ 'x-requested-with': 'TuneTyper' }, optionsOrHeaders);
         }
 
         const execute = (srv) => {
