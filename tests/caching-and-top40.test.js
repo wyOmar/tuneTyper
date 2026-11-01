@@ -292,13 +292,14 @@ test('Express Edge headers, read-through lyrics/Deezer caching & 24/7 UK Top 40 
         const crossBody = JSON.parse(crossRes.body);
         assert.match(crossBody.error, /cross-origin API access is disabled/i);
 
-        // 4. Authorized request from TuneTyper frontend succeeds
+        // 4. Authorized request from TuneTyper frontend succeeds and includes Vary header for Edge CDN partitioning
         const legitRes = await requestApp(server, '/lyrics?artist=Post%20Malone&track=I%20Had%20Some%20Help%20(feat.%20Morgan%20Wallen)', {
             headers: {
                 'x-requested-with': 'TuneTyper'
             }
         });
         assert.equal(legitRes.statusCode, 200);
+        assert.match(legitRes.headers['vary'] || '', /x-requested-with/i);
         assert.match(JSON.parse(legitRes.body).lyrics, /make this kind of mess/);
     });
 
