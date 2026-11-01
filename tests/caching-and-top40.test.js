@@ -461,11 +461,12 @@ test('Express Edge headers, read-through lyrics/Deezer caching & 24/7 UK Top 40 
         assert.equal(ovhCalls, ovhCallsAfterWarm, 'Already-cached chart tracks + 24h negative-cached misses require 0 OVH calls');
     });
 
-    await t.test('vercel.json configures a Hobby-compatible daily cron schedule for /api/cron/warm-cache', () => {
+    await t.test('vercel.json configures a Hobby-compatible daily cron schedule and lhr1 region', () => {
         const vercelCfg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'));
         assert.ok(Array.isArray(vercelCfg.crons) && vercelCfg.crons.length === 1);
         assert.equal(vercelCfg.crons[0].path, '/api/cron/warm-cache');
         assert.equal(vercelCfg.crons[0].schedule, '0 6 * * *');
+        assert.deepEqual(vercelCfg.regions, ['lhr1'], 'vercel.json must set London region lhr1 for low UK/EU latency');
     });
 });
 

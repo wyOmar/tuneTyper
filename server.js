@@ -293,18 +293,33 @@ async function warmUkTop40Cache(options = {}) {
 // Dynamic XML Sitemap Route (served before static middleware so it is always fresh)
 app.get('/sitemap.xml', (req, res) => {
     res.header('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800');
+    res.setHeader('Vary', 'Accept-Encoding');
     res.send(generateSitemapXml());
 });
 
 // Serve root /favicon.ico from /public/favicon/favicon.ico
 app.get('/favicon.ico', (req, res) => {
+    res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400');
     res.sendFile(path.join(publicDir, 'favicon', 'favicon.ico'));
 });
 
-app.use(express.static(publicDir));
+app.use(express.static(publicDir, {
+    maxAge: '1d',
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+            res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
+            res.setHeader('Vary', 'Accept-Encoding');
+        } else if (filePath.match(/\.(css|js|png|jpg|jpeg|gif|ico|svg|woff2?|webmanifest)$/)) {
+            res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400');
+        }
+    }
+}));
 
 // Serve the frontend
 app.get('/', (req, res) => {
+    res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
+    res.setHeader('Vary', 'Accept-Encoding');
     res.sendFile(indexHtmlPath);
 });
 
@@ -754,6 +769,8 @@ app.get('/:slug', (req, res, next) => {
     }
 
     res.header('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
+    res.setHeader('Vary', 'Accept-Encoding');
     res.send(renderArtistHtml(artist, baseIndexHtml));
 });
 
