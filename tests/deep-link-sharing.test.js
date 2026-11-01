@@ -437,4 +437,27 @@ test.describe('Handling early endGame (guess-only share without WPM)', () => {
 
         assert.ok(songInfoEl.innerHTML.includes('Challenge Incomplete! You ended the typing race early.'));
     });
+
+    test('generateShareText in song/shared mode when ended early omits redundant practice line and WPM', () => {
+        resetGame(false);
+        _setState({
+            currentGameMode: 'song',
+            isSharedGame: false,
+            completedTyping: false,
+            finalWPM: null,
+            finalAccuracy: null,
+            selectedTrack: {
+                title: 'opposite',
+                artist: { name: 'Sabrina Carpenter' },
+                album: { title: 'emails i cant send', cover_medium: 'https://example.com/art.jpg' }
+            }
+        });
+
+        const shareText = generateShareText();
+        assert.ok(shareText.includes('🎵 TuneTyper'));
+        assert.ok(shareText.includes('🎤 "opposite" — Sabrina Carpenter'));
+        assert.ok(!shareText.includes('Direct Song Practice'), 'Direct song practice line must be omitted when ended early');
+        assert.ok(!shareText.includes('WPM'), 'WPM line must be omitted when ended early');
+        assert.ok(shareText.includes('Play here: https://type.vincentchan.uk/?c='));
+    });
 });

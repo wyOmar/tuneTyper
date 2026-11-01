@@ -1670,7 +1670,7 @@ function generateShareText() {
     let emojiGrid = '';
 
     if (isSharedGame || currentGameMode === 'song') {
-        guessLine = isCompleted ? '⚡ Direct Song Practice' : '⚡ Direct Song Practice (Ended early)';
+        guessLine = isCompleted ? '⚡ Direct Song Practice' : '';
         emojiGrid = ''; // Direct search or shared game skips song guessing, no boxes to display
     } else if (gaveUp) {
         guessLine = '🎯 Song revealed';
