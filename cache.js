@@ -25,6 +25,7 @@ const TTL = {
     PLAYLIST_PLAYABLE_SECONDS: 2 * 24 * 60 * 60, // 48 hours rolling cache for pre-warmed playlist manifests
     LYRICS_MISS_SECONDS: 24 * 60 * 60,        // 24 hours negative cache for 404 lyrics
     TRACK_DETAILS_SECONDS: 10 * 60,           // 10 mins (contains fresh signed audio preview URL)
+    OG_IMAGE_SECONDS: 30 * 24 * 60 * 60,      // 30 days immutable edge and L1 cache for generated song OG images
     RAW_PLAYLIST_FALLBACK_SECONDS: 15 * 60,   // 15 mins before first cron warm completes
     DEFAULT_L1_SECONDS: 60 * 60               // 1 hour max in warm serverless RAM for keys without explicit TTL
 };
@@ -68,6 +69,10 @@ function topTracksCacheKey(artistId, limit) {
 
 function trackDetailsCacheKey(trackId) {
     return `${CACHE_PREFIX}:track-details:${String(trackId).trim()}`;
+}
+
+function ogSongImageCacheKey(trackId) {
+    return `${CACHE_PREFIX}:og-song:${String(trackId).trim()}`;
 }
 
 const UNWANTED_ARTIST_PATTERNS = [
@@ -395,6 +400,7 @@ module.exports = {
     tracksSearchCacheKey,
     topTracksCacheKey,
     trackDetailsCacheKey,
+    ogSongImageCacheKey,
     sanitizeTrackForCache,
     isUnwantedTrack,
     UNWANTED_ARTIST_PATTERNS,
