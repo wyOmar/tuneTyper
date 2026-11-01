@@ -7,35 +7,8 @@ const axios = require('axios');
 
 const { isUnwantedTrack } = require('../cache');
 const app = require('../server');
-
-function requestApp(server, urlPath, options = {}) {
-    return new Promise((resolve, reject) => {
-        const addr = server.address();
-        const port = typeof addr === 'object' ? addr.port : 3000;
-        const req = http.request(
-            {
-                hostname: '127.0.0.1',
-                port,
-                path: urlPath,
-                method: options.method || 'GET',
-                headers: options.headers || {}
-            },
-            (res) => {
-                let data = '';
-                res.on('data', (chunk) => { data += chunk; });
-                res.on('end', () => {
-                    resolve({
-                        statusCode: res.statusCode,
-                        headers: res.headers,
-                        body: data
-                    });
-                });
-            }
-        );
-        req.on('error', reject);
-        req.end();
-    });
-}
+const { requestApp } = require('./helpers/http');
+const { setupMockDom } = require('./helpers/dom');
 
 test('Unwanted track & cover filter detection', async (t) => {
     await t.test('Identifies piano covers, karaoke, and instrumental versions as unwanted', () => {
@@ -192,118 +165,26 @@ test('Toast notifications UI and alert replacement', async (t) => {
     });
 
     await t.test('showToast renders non-intrusive toast with icon, message, and close button in mock DOM', () => {
-        function createMockClassList() {
-            const classes = new Set();
-            return {
-                add: (...names) => names.forEach((n) => classes.add(n)),
-                remove: (...names) => names.forEach((n) => classes.delete(n)),
-                contains: (name) => classes.has(name)
-            };
-        }
+        const { getOrCreateElement } = setupMockDom();
+        const container = getOrCreateElement('toast-container');
 
-        const children = [];
-        const container = {
-            id: 'toast-container',
-            className: 'toast-container',
-            children,
-            childNodes: children,
-            appendChild: (child) => {
-                child.parentNode = container;
-                children.push(child);
-            },
-            removeChild: (child) => {
-                const idx = children.indexOf(child);
-                if (idx !== -1) children.splice(idx, 1);
-            },
-            contains: (child) => children.includes(child),
-            set innerHTML(val) {
-                if (val === '') children.length = 0;
-            }
-        };
+        delete require.cache[require.resolve('../public/script')];
+        const scriptModule = require('../public/script');
 
-        const mockDoc = {
-            getElementById: (id) => (id === 'toast-container' ? container : null),
-            querySelector: () => null,
-            querySelectorAll: () => [],
-            addEventListener: () => {},
-            createElement: (tag) => {
-                const listeners = {};
-                const elChildren = [];
-                let clsName = '';
-                const classes = new Set();
-                const classList = {
-                    add: (...names) => names.forEach((n) => {
-                        classes.add(n);
-                        clsName = Array.from(classes).join(' ');
-                    }),
-                    remove: (...names) => names.forEach((n) => {
-                        classes.delete(n);
-                        clsName = Array.from(classes).join(' ');
-                    }),
-                    contains: (name) => classes.has(name)
-                };
-                return {
-                    tag,
-                    style: {},
-                    classList,
-                    get className() { return clsName; },
-                    set className(val) {
-                        clsName = String(val || '');
-                        classes.clear();
-                        clsName.split(/\s+/).filter(Boolean).forEach((c) => classes.add(c));
-                    },
-                    children: elChildren,
-                    childNodes: elChildren,
-                    appendChild: (c) => elChildren.push(c),
-                    removeChild: (c) => {
-                        const idx = elChildren.indexOf(c);
-                        if (idx !== -1) elChildren.splice(idx, 1);
-                    },
-                    querySelector: (sel) => {
-                        if (sel === '.toast-message') return elChildren.find(c => c.className === 'toast-message');
-                        if (sel === '.toast-close-btn') return elChildren.find(c => c.className === 'toast-close-btn');
-                        return null;
-                    },
-                    setAttribute: () => {},
-                    addEventListener: (type, fn) => {
-                        if (!listeners[type]) listeners[type] = [];
-                        listeners[type].push(fn);
-                    },
-                    click: () => {
-                        if (listeners.click) listeners.click.forEach(fn => fn());
-                    }
-                };
-            },
-            body: {
-                appendChild: () => {},
-                prepend: () => {}
-            }
-        };
+        const toast = scriptModule.showToast('Lyrics not found for "expectations". Try another track.', 'error', 0);
+        assert.ok(toast, 'showToast should return a toast element');
+        assert.ok(container.children.includes(toast), 'Toast should be appended to container');
+        assert.ok(toast.classList.contains('toast-error'), 'Toast should have toast-error class');
 
-        const origDoc = global.document;
-        global.document = mockDoc;
+        const msgEl = toast.querySelector('.toast-message');
+        assert.ok(msgEl, 'Toast should contain .toast-message');
+        assert.equal(msgEl.textContent, 'Lyrics not found for "expectations". Try another track.');
 
-        try {
-            delete require.cache[require.resolve('../public/script')];
-            const scriptModule = require('../public/script');
+        const closeBtn = toast.querySelector('.toast-close-btn');
+        assert.ok(closeBtn, 'Toast should have .toast-close-btn');
 
-            const toast = scriptModule.showToast('Lyrics not found for "expectations". Try another track.', 'error', 0);
-            assert.ok(toast, 'showToast should return a toast element');
-            assert.ok(container.children.includes(toast), 'Toast should be appended to container');
-            assert.ok(toast.classList.contains('toast-error'), 'Toast should have toast-error class');
-
-            const msgEl = toast.querySelector('.toast-message');
-            assert.ok(msgEl, 'Toast should contain .toast-message');
-            assert.equal(msgEl.textContent, 'Lyrics not found for "expectations". Try another track.');
-
-            const closeBtn = toast.querySelector('.toast-close-btn');
-            assert.ok(closeBtn, 'Toast should have .toast-close-btn');
-
-            closeBtn.click();
-            assert.ok(toast.classList.contains('toast-hiding'), 'Toast should receive toast-hiding class on close');
-        } finally {
-            global.document = origDoc;
-        }
+        closeBtn.click();
+        assert.ok(toast.classList.contains('toast-hiding'), 'Toast should receive toast-hiding class on close');
     });
 
     await t.test('Client search failure uses showToast instead of native window.alert', async () => {

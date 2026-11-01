@@ -15,29 +15,7 @@ const {
 } = require('../cache');
 
 const app = require('../server');
-
-function requestApp(server, urlPath, headers = {}) {
-    return new Promise((resolve, reject) => {
-        const { port } = server.address();
-        const req = http.request(
-            {
-                hostname: '127.0.0.1',
-                port,
-                path: urlPath,
-                method: 'GET',
-                headers
-            },
-            (res) => {
-                let body = '';
-                res.setEncoding('utf8');
-                res.on('data', (chunk) => { body += chunk; });
-                res.on('end', () => resolve({ statusCode: res.statusCode, headers: res.headers, body }));
-            }
-        );
-        req.on('error', reject);
-        req.end();
-    });
-}
+const { requestApp } = require('./helpers/http');
 
 /**
  * In-memory mock of Upstash Redis HTTP REST API (`GET`, `MGET`, `SET`, `DEL`)

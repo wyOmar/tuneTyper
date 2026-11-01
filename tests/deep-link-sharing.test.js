@@ -1,66 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-// Mock a lightweight browser-like DOM environment before requiring script.js
-global.document = {
-    getElementById: (id) => {
-        return {
-            id,
-            style: {},
-            classList: { add: () => {}, remove: () => {}, toggle: () => {} },
-            innerHTML: '',
-            textContent: '',
-            value: '',
-            disabled: false,
-            focus: () => {},
-            addEventListener: () => {},
-            querySelectorAll: () => [],
-            querySelector: () => null,
-            offsetTop: 0,
-            offsetHeight: 30,
-            clientHeight: 200,
-            scrollTo: () => {}
-        };
-    },
-    querySelector: () => ({ textContent: '', classList: { remove: () => {}, add: () => {} } }),
-    querySelectorAll: () => [],
-    createElement: (tag) => ({
-        tag,
-        style: {},
-        setAttribute: () => {},
-        appendChild: () => {},
-        addEventListener: () => {},
-        select: () => {},
-        focus: () => {}
-    }),
-    body: {
-        appendChild: () => {},
-        removeChild: () => {},
-        prepend: () => {}
-    },
-    addEventListener: () => {},
-    execCommand: () => true
-};
-
-global.window = {
-    location: {
-        origin: 'https://type.vincentchan.uk',
-        pathname: '/',
-        search: ''
-    },
-    addEventListener: () => {}
-};
-
-global.Audio = class {
-    constructor() {
-        this.currentTime = 0;
-        this.volume = 1;
-        this.paused = true;
-    }
-    play() { return Promise.resolve(); }
-    pause() {}
-    addEventListener() {}
-};
+const { setupMockDom } = require('./helpers/dom');
+setupMockDom();
 
 const {
     generateChallengeUrl,

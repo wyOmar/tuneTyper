@@ -1,58 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-// Mock DOM elements before importing script
-const mockElements = {};
-function getOrCreateMockElement(id) {
-    if (!mockElements[id]) {
-        mockElements[id] = {
-            id,
-            value: '',
-            style: {},
-            classList: {
-                add: () => {},
-                remove: () => {},
-                contains: () => false,
-                toggle: () => {}
-            },
-            disabled: false,
-            textContent: '',
-            innerHTML: '',
-            scrollTop: 0,
-            offsetTop: 0,
-            offsetHeight: 20,
-            clientHeight: 100,
-            focus: () => {},
-            click: () => {},
-            addEventListener: () => {},
-            querySelectorAll: () => [],
-            querySelector: () => null
-        };
-    }
-    return mockElements[id];
-}
-
-global.document = {
-    getElementById: (id) => getOrCreateMockElement(id),
-    querySelector: () => null,
-    querySelectorAll: () => [],
-    addEventListener: () => {},
-    createElement: (tag) => ({
-        tag,
-        style: {},
-        appendChild: () => {},
-        addEventListener: () => {}
-    }),
-    body: {
-        prepend: () => {},
-        appendChild: () => {},
-        removeChild: () => {}
-    }
-};
-
-global.window = {
-    addEventListener: () => {}
-};
+const { setupMockDom } = require('./helpers/dom');
+setupMockDom();
 
 const script = require('../public/script.js');
 const {
