@@ -390,6 +390,9 @@ function requireGameClient(req, res, next) {
         });
     }
 
+    // Ensure downstream Edge CDNs (Vercel) partition cache entries by client verification headers
+    res.setHeader('Vary', 'X-Requested-With, Sec-Fetch-Dest, Accept');
+
     next();
 }
 
