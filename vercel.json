@@ -10,7 +10,8 @@
       "config": {
         "maxDuration": 60,
         "includeFiles": [
-          "assets/**"
+          "assets/**",
+          "public/**"
         ]
       }
     }

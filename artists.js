@@ -1335,39 +1335,39 @@ function renderArtistHtml(artist, baseIndexHtml) {
 
     html = html.replace(
         /<link\s+rel=["']canonical["'][^>]*>/i,
-        `<link rel="canonical" href="${safeCanonical}">`
+        () => `<link rel="canonical" href="${safeCanonical}">`
     );
     html = html.replace(
         /<title>[^<]*<\/title>/i,
-        `<title>${safeTitle}</title>`
+        () => `<title>${safeTitle}</title>`
     );
     html = html.replace(
         /<meta\s+name=["']description["'][^>]*>/i,
-        `<meta name="description" content="${safeDesc}">`
+        () => `<meta name="description" content="${safeDesc}">`
     );
     html = html.replace(
         /<meta\s+name=["']keywords["'][^>]*>/i,
-        `<meta name="keywords" content="${safeKeywords}">`
+        () => `<meta name="keywords" content="${safeKeywords}">`
     );
     html = html.replace(
         /<meta\s+property=["']og:title["'][^>]*>/i,
-        `<meta property="og:title" content="${safeSocialTitle}">`
+        () => `<meta property="og:title" content="${safeSocialTitle}">`
     );
     html = html.replace(
         /<meta\s+property=["']og:description["'][^>]*>/i,
-        `<meta property="og:description" content="${safeSocialDesc}">`
+        () => `<meta property="og:description" content="${safeSocialDesc}">`
     );
     html = html.replace(
         /<meta\s+property=["']og:url["'][^>]*>/i,
-        `<meta property="og:url" content="${safeCanonical}">`
+        () => `<meta property="og:url" content="${safeCanonical}">`
     );
     html = html.replace(
         /<meta\s+name=["']twitter:title["'][^>]*>/i,
-        `<meta name="twitter:title" content="${safeSocialTitle}">`
+        () => `<meta name="twitter:title" content="${safeSocialTitle}">`
     );
     html = html.replace(
         /<meta\s+name=["']twitter:description["'][^>]*>/i,
-        `<meta name="twitter:description" content="${safeSocialDesc}">`
+        () => `<meta name="twitter:description" content="${safeSocialDesc}">`
     );
 
     const leadTrackTitle = Array.isArray(artist.tracks) && artist.tracks[0] && artist.tracks[0].title
@@ -1379,41 +1379,41 @@ function renderArtistHtml(artist, baseIndexHtml) {
 
     html = html.replace(
         /<meta\s+property=["']og:image["'][^>]*>/i,
-        `<meta property="og:image" content="${artistOgImageUrl}">`
+        () => `<meta property="og:image" content="${artistOgImageUrl}">`
     );
     html = html.replace(
         /<meta\s+property=["']og:image:alt["'][^>]*>/i,
-        `<meta property="og:image:alt" content="${safeOgAlt}">`
+        () => `<meta property="og:image:alt" content="${safeOgAlt}">`
     );
     html = html.replace(
         /<meta\s+name=["']twitter:image["'][^>]*>/i,
-        `<meta name="twitter:image" content="${artistOgImageUrl}">`
+        () => `<meta name="twitter:image" content="${artistOgImageUrl}">`
     );
     html = html.replace(
         /<meta\s+name=["']twitter:image:alt["'][^>]*>/i,
-        `<meta name="twitter:image:alt" content="${safeOgAlt}">`
+        () => `<meta name="twitter:image:alt" content="${safeOgAlt}">`
     );
 
     // Demote navbar brand heading to <span> on artist routes so the artist shelf <h1> is the sole semantic <h1>
     html = html.replace(
         /<h1\s+class=["']navbar-title["']>([^<]*)<\/h1>/i,
-        `<span class="navbar-title">$1</span>`
+        (_, titleText) => `<span class="navbar-title">${titleText}</span>`
     );
 
     // Pre-fill #artist-input cleanly regardless of placeholder text
     html = html.replace(
         /<input\s+type=["']text["']\s+id=["']artist-input["']([^>]*)>/i,
-        `<input type="text" id="artist-input" value="${safeArtistName}"$1>`
+        (_, restAttrs) => `<input type="text" id="artist-input" value="${safeArtistName}"${restAttrs}>`
     );
 
     // Inject standalone Popular Tracks container underneath the main game container
     if (html.includes("<div id=\"artist-tracks-slot\"></div>")) {
-        html = html.replace("<div id=\"artist-tracks-slot\"></div>", shelfHtml);
+        html = html.replace("<div id=\"artist-tracks-slot\"></div>", () => shelfHtml);
     }
 
     // Hide curated playlists shelf on artist landing routes so artist tracks are front-and-center
     html = html.replace(
-        /<div id=["']curated-playlists-slot["']>[\s\S]*?<\/section>\s*<\/div>/i,
+        /<div id=["']curated-playlists-slot["'][\s\S]*?<\/section>\s*<\/div>/i,
         '<div id="curated-playlists-slot" style="display: none;"></div>'
     );
 
@@ -1421,16 +1421,16 @@ function renderArtistHtml(artist, baseIndexHtml) {
     const escapedSlugForRegex = artist.slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     html = html.replace(
         new RegExp(`<a\\s+href=["']/${escapedSlugForRegex}["']>`, "i"),
-        `<a href="/${escapeHtml(artist.slug)}" aria-current="page">`
+        () => `<a href="/${escapeHtml(artist.slug)}" aria-current="page">`
     );
 
     html = html.replace(
         /<script\s+id=["']structured-data["']\s+type=["']application\/ld\+json["']>[\s\S]*?<\/script>/i,
-        `<script id="structured-data" type="application/ld+json">\n${structuredData}\n    </script>`
+        () => `<script id="structured-data" type="application/ld+json">\n${structuredData}\n    </script>`
     );
     html = html.replace(
         /<script\s+src=["']\/script\.js["']><\/script>/i,
-        `${bootScript}\n    <script src="/script.js"></script>`
+        () => `${bootScript}\n    <script src="/script.js"></script>`
     );
 
     return html;

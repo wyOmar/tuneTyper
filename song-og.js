@@ -435,7 +435,7 @@ function buildSongOgSvg({ track, artist, album, coverDataUri, logoDataUri, lyric
 
   <!-- Brand Header: full-width, no overlapping pill -->
   <g id="header">
-    <image href="${logoUri}" x="56" y="46" width="58" height="58" clip-path="url(#logoClip)"/>
+    <image href="${escapeXml(logoUri)}" x="56" y="46" width="58" height="58" clip-path="url(#logoClip)"/>
     <text x="132" y="${headerY}" fill="#ffffff" font-size="44" font-weight="bold" font-family="DejaVu Sans Mono, monospace">TuneTyper<tspan fill="#555555" font-weight="300"> / </tspan><tspan fill="#4caf50" font-size="${headerFontSize}">${safeTrack}</tspan></text>
   </g>
 
@@ -447,7 +447,7 @@ function buildSongOgSvg({ track, artist, album, coverDataUri, logoDataUri, lyric
   <!-- Left: Track Card with multi-line title wrapping -->
   <g id="track-card">
     <rect x="56" y="180" width="250" height="320" rx="14" fill="#181818" stroke="#2e2e2e" stroke-width="2"/>
-    <image href="${coverUri}" x="74" y="196" width="214" height="214" clip-path="url(#albumClip)"/>
+    <image href="${escapeXml(coverUri)}" x="74" y="196" width="214" height="214" clip-path="url(#albumClip)"/>
     ${cardTitleSvg}
     <text x="74" y="${cardMetaY}" fill="#888888" font-size="14" font-family="DejaVu Sans, Arial, sans-serif">${safeMetaText}</text>
   </g>
@@ -573,16 +573,16 @@ function renderSongHtml(trackDetails, challenge, baseIndexHtml) {
 
     let html = baseIndexHtml;
 
-    html = html.replace(/<title>[^<]*<\/title>/i, `<title>${safeTitle}</title>`);
-    html = html.replace(/<meta\s+name=["']description["'][^>]*>/i, `<meta name="description" content="${safeDesc}">`);
-    html = html.replace(/<meta\s+property=["']og:title["'][^>]*>/i, `<meta property="og:title" content="${safeTitle}">`);
-    html = html.replace(/<meta\s+property=["']og:description["'][^>]*>/i, `<meta property="og:description" content="${safeDesc}">`);
-    html = html.replace(/<meta\s+property=["']og:image["'][^>]*>/i, `<meta property="og:image" content="${safeOgImage}">`);
-    html = html.replace(/<meta\s+property=["']og:image:alt["'][^>]*>/i, `<meta property="og:image:alt" content="${safeOgAlt}">`);
-    html = html.replace(/<meta\s+name=["']twitter:title["'][^>]*>/i, `<meta name="twitter:title" content="${safeTitle}">`);
-    html = html.replace(/<meta\s+name=["']twitter:description["'][^>]*>/i, `<meta name="twitter:description" content="${safeDesc}">`);
-    html = html.replace(/<meta\s+name=["']twitter:image["'][^>]*>/i, `<meta name="twitter:image" content="${safeOgImage}">`);
-    html = html.replace(/<meta\s+name=["']twitter:image:alt["'][^>]*>/i, `<meta name="twitter:image:alt" content="${safeOgAlt}">`);
+    html = html.replace(/<title>[^<]*<\/title>/i, () => `<title>${safeTitle}</title>`);
+    html = html.replace(/<meta\s+name=["']description["'][^>]*>/i, () => `<meta name="description" content="${safeDesc}">`);
+    html = html.replace(/<meta\s+property=["']og:title["'][^>]*>/i, () => `<meta property="og:title" content="${safeTitle}">`);
+    html = html.replace(/<meta\s+property=["']og:description["'][^>]*>/i, () => `<meta property="og:description" content="${safeDesc}">`);
+    html = html.replace(/<meta\s+property=["']og:image["'][^>]*>/i, () => `<meta property="og:image" content="${safeOgImage}">`);
+    html = html.replace(/<meta\s+property=["']og:image:alt["'][^>]*>/i, () => `<meta property="og:image:alt" content="${safeOgAlt}">`);
+    html = html.replace(/<meta\s+name=["']twitter:title["'][^>]*>/i, () => `<meta name="twitter:title" content="${safeTitle}">`);
+    html = html.replace(/<meta\s+name=["']twitter:description["'][^>]*>/i, () => `<meta name="twitter:description" content="${safeDesc}">`);
+    html = html.replace(/<meta\s+name=["']twitter:image["'][^>]*>/i, () => `<meta name="twitter:image" content="${safeOgImage}">`);
+    html = html.replace(/<meta\s+name=["']twitter:image:alt["'][^>]*>/i, () => `<meta name="twitter:image:alt" content="${safeOgAlt}">`);
 
     return html;
 }
