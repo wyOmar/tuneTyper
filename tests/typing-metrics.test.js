@@ -445,3 +445,15 @@ test('End-to-end handleTypingInput simulation', async (t) => {
         assert.equal(state.finalAccuracy, 75);
     });
 });
+
+test('normalizeTextForTyping input resilience & safety', async (t) => {
+    await t.test('handles null and undefined safely without throwing', () => {
+        assert.equal(normalizeTextForTyping(null), '');
+        assert.equal(normalizeTextForTyping(undefined), '');
+        assert.equal(normalizeTextForTyping(''), '');
+    });
+
+    await t.test('normalizes characters and options properly', () => {
+        assert.equal(normalizeTextForTyping('Hello, world! (chorus)', true, true, false), 'hello world');
+    });
+});

@@ -412,6 +412,7 @@ function extractRandomSection(text, minLength = 150, maxLength = 300, targetStar
 }
 
 function normalizeTextForTyping(text, removePunctuation = false, removeAdlibs = false, removeNumbers = false) {
+    text = String(text ?? '');
     // The API being used for lyrics, ovh, sometimes returns lyrics with weird characters like that weird "e"
     text = text.normalize('NFKD').replace(/е/g, 'e');
     text = text.replace(/[\u2018\u2019\u201A\u201B]/g, "'")
@@ -1878,7 +1879,7 @@ function showFinalInfo() {
     const albumTitle = (selectedTrack && selectedTrack.album && selectedTrack.album.title) || trackTitle;
     const trackPreview = (selectedTrack && selectedTrack.preview) || '';
 
-    const formatLyricsHtml = (str) => String(str || '').replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>');
+    const formatLyricsHtml = (str) => escapeHtml(str).replace(/\r/g, '\n').replace(/\n\n/g, '<br>').replace(/\n/g, '<br>');
 
     const currentPunc = removePunctuationCheckbox ? removePunctuationCheckbox.checked : false;
     const currentNum = includeNumbersCheckbox ? includeNumbersCheckbox.checked : false;
@@ -1899,9 +1900,9 @@ function showFinalInfo() {
                     <h3 class="final-track-title">${escapeHtml(trackTitle)}</h3>
                     <p class="final-track-artist">${escapeHtml(artistName)}</p>
                 </div>
-                <img id="album-image" class="final-album-art" src="${albumCover}" alt="${escapeHtml(albumTitle)}">
+                <img id="album-image" class="final-album-art" src="${escapeHtml(albumCover)}" alt="${escapeHtml(albumTitle)}">
                 <audio id="song-preview" class="final-audio-player" controls>
-                    <source src="${trackPreview}" type="audio/mpeg">
+                    <source src="${escapeHtml(trackPreview)}" type="audio/mpeg">
                     Your browser does not support the audio element.
                 </audio>
             </div>

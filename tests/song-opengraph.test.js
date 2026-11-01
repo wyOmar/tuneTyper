@@ -248,6 +248,20 @@ test.describe('Dynamic Song OpenGraph Generator & SSR Metadata', () => {
 
             assert.ok(html.includes('Type the lyrics to &quot;Bad Habits&quot; by Ed Sheeran. Test and train your typing speed on TuneTyper!'));
         });
+
+        test('safely handles titles with dollar signs ($1, $\', $&) without template replacement corruption', () => {
+            const trackDetails = {
+                id: 999999,
+                title: 'For Free? ($1) & Ke$ha',
+                artist: { name: "A$AP Rocky & $'" }
+            };
+            const challenge = { trackId: 999999 };
+
+            const html = renderSongHtml(trackDetails, challenge, sampleIndexHtml);
+
+            assert.ok(html.includes('<title>For Free? ($1) &amp; Ke$ha \u2014 A$AP Rocky &amp; $&apos; | TuneTyper Challenge</title>'));
+            assert.ok(!html.includes('Default description'));
+        });
     });
 
     test.describe('Express HTTP integration tests', () => {

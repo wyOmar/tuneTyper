@@ -166,6 +166,11 @@ async function warmSinglePlaylist(playlistId, options = {}) {
         `https://api.deezer.com/playlist/${encodeURIComponent(playlistId)}`,
         { timeout: 10000 }
     );
+    if (playlistRes.data && playlistRes.data.error) {
+        const err = new Error(playlistRes.data.error.message || 'Deezer playlist error');
+        err.statusCode = (playlistRes.data.error.code === 4) ? 429 : 502;
+        throw err;
+    }
     const rawTracks = (playlistRes.data && playlistRes.data.tracks && Array.isArray(playlistRes.data.tracks.data))
         ? playlistRes.data.tracks.data
         : [];
@@ -387,6 +392,9 @@ app.get('/api/cron/warm-cache', async (req, res) => {
 
     if (cronSecret && !isAuthorized) {
         return res.status(401).json({ error: 'Unauthorized' });
+    }
+    if (!cronSecret && process.env.NODE_ENV === 'production') {
+        return res.status(401).json({ error: 'Unauthorized: CRON_SECRET is not configured' });
     }
 
     const force = req.query.force === '1' && isAuthorized;
