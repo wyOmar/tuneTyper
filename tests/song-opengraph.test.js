@@ -5,6 +5,7 @@ const http = require('http');
 const {
     escapeXml,
     truncate,
+    wrapWords,
     getFontFiles,
     decodeChallengeToken,
     prepareLyricsSnippet,
@@ -30,6 +31,14 @@ test.describe('Dynamic Song OpenGraph Generator & SSR Metadata', () => {
             assert.equal(truncate('This is a very long track title that will overflow the card', 25), 'This is a very long trac…');
             assert.equal(truncate('', 10), '');
             assert.equal(truncate(null, 10), '');
+        });
+
+        test('wrapWords wraps text at word boundaries into multiple lines without truncating words', () => {
+            const lines = wrapWords('We Almost Broke Up Again Last Night', 20, 2);
+            assert.deepEqual(lines, ['We Almost Broke Up', 'Again Last Night']);
+            assert.deepEqual(wrapWords('the grudge', 20, 2), ['the grudge']);
+            assert.deepEqual(wrapWords('', 20, 2), []);
+            assert.deepEqual(wrapWords(null, 20, 2), []);
         });
 
         test('decodeChallengeToken decodes v3 binary token into trackId, wpm, and condition flags', () => {
@@ -72,7 +81,7 @@ test.describe('Dynamic Song OpenGraph Generator & SSR Metadata', () => {
     });
 
     test.describe('SVG & PNG image generation', () => {
-        test('buildSongOgSvg produces valid 1200x630 SVG with dark theme and styling', () => {
+        test('buildSongOgSvg produces valid 1200x630 SVG with dark theme and no pill or "can you beat me"', () => {
             const svg = buildSongOgSvg({
                 track: 'Bad Habits',
                 artist: 'Ed Sheeran',
@@ -84,8 +93,30 @@ test.describe('Dynamic Song OpenGraph Generator & SSR Metadata', () => {
             assert.ok(svg.includes('height="630"'));
             assert.ok(svg.includes('Bad Habits'));
             assert.ok(svg.includes('Ed Sheeran'));
-            assert.ok(svg.includes('SONG CHALLENGE'));
+            // Verified: top-right SONG CHALLENGE pill and bottom-left "Can you beat me?" removed
+            assert.ok(!svg.includes('SONG CHALLENGE'));
+            assert.ok(!svg.includes('Can you beat me?'));
             assert.ok(svg.includes('type.vincentchan.uk'));
+            assert.ok(svg.includes('Play Bad Habits &#x2192;') || svg.includes('Play Bad Habits →'));
+        });
+
+        test('buildSongOgSvg handles long titles with dynamic font scaling and multi-line wrapping', () => {
+            const svg = buildSongOgSvg({
+                track: 'We Almost Broke Up Again Last Night',
+                artist: 'Sabrina Carpenter',
+                album: "Man's Best Friend",
+                lyricsSnippet: prepareLyricsSnippet('Bullshit repeats itself\nIs that how the saying goes?')
+            });
+
+            // Long title in track card wraps to 2 lines instead of cutting off
+            assert.ok(svg.includes('We Almost Broke Up'));
+            assert.ok(svg.includes('Again Last Night'));
+            // Long title in CTA button uses clean "Play Track →" instead of awkward truncated title
+            assert.ok(svg.includes('Play Track &#x2192;') || svg.includes('Play Track →'));
+            // Full title is present in the header with scaled font
+            assert.ok(svg.includes('We Almost Broke Up Again Last Night'));
+            assert.ok(!svg.includes('SONG CHALLENGE'));
+            assert.ok(!svg.includes('Can you beat me?'));
         });
 
         test('buildSongOgSvg renders fallback text when lyrics are null or unavailable', () => {

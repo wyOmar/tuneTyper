@@ -192,17 +192,92 @@ function prepareLyricsSnippet(rawLyrics, options = {}) {
 }
 
 /**
+ * Split text at word boundaries into up to maxLines lines without truncating words
+ */
+function wrapWords(text, maxCharsPerLine = 20, maxLines = 2) {
+    if (!text || typeof text !== 'string') return [];
+    const words = text.trim().split(/\s+/);
+    const lines = [];
+    let currentLine = '';
+
+    for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        if (!currentLine) {
+            currentLine = word;
+        } else if ((currentLine + ' ' + word).length <= maxCharsPerLine) {
+            currentLine += ' ' + word;
+        } else {
+            lines.push(currentLine);
+            currentLine = word;
+            if (lines.length === maxLines - 1) {
+                const rest = words.slice(i + 1).join(' ');
+                if (rest) currentLine += ' ' + rest;
+                break;
+            }
+        }
+    }
+    if (currentLine) lines.push(currentLine);
+    return lines;
+}
+
+/**
  * Build 1200x630 SVG for dynamic Song OpenGraph card
  */
 function buildSongOgSvg({ track, artist, album, coverDataUri, logoDataUri, lyricsSnippet }) {
-    const safeTrack = escapeXml(track || 'Unknown Track');
-    const safeArtist = escapeXml(artist || 'Unknown Artist');
-    const safeAlbum = escapeXml(album || track || 'Single');
-    const safeTaglineTrack = escapeXml(truncate(track || 'Unknown Track', 32));
-    const safeTaglineArtist = escapeXml(truncate(artist || 'Unknown Artist', 28));
-    const safeCardTrack = escapeXml(truncate(track || 'Unknown Track', 22));
-    const safeCardMeta = escapeXml(truncate(`${artist || 'Unknown Artist'} • ${album || 'Single'}`, 26));
-    const safeCtaTrack = escapeXml(truncate(track || 'Song', 18));
+    const rawTrack = track || 'Unknown Track';
+    const rawArtist = artist || 'Unknown Artist';
+    const rawAlbum = album || rawTrack || 'Single';
+
+    const safeTrack = escapeXml(rawTrack);
+    const safeArtist = escapeXml(rawArtist);
+    const safeAlbum = escapeXml(rawAlbum);
+
+    // 1. Header font scaling: scale down smoothly as track length increases so full title fits without truncating
+    let headerFontSize = 42;
+    let headerY = 90;
+    if (rawTrack.length > 34) {
+        headerFontSize = 26;
+        headerY = 86;
+    } else if (rawTrack.length > 25) {
+        headerFontSize = 32;
+        headerY = 88;
+    } else if (rawTrack.length > 18) {
+        headerFontSize = 36;
+        headerY = 89;
+    }
+
+    // 2. Tagline font scaling: ensure full track and artist fit without overflowing the 1200px frame
+    const combinedTaglineLen = rawTrack.length + rawArtist.length;
+    let taglineFontSize = 24;
+    if (combinedTaglineLen > 50) {
+        taglineFontSize = 19;
+    } else if (combinedTaglineLen > 36) {
+        taglineFontSize = 21;
+    }
+
+    // 3. Track card multi-line wrapping: split long titles across 2 lines so the full title fits below album art
+    const trackCardLines = wrapWords(rawTrack, 20, 2);
+    let cardTitleSvg = '';
+    let cardMetaY = 478;
+
+    if (trackCardLines.length === 1) {
+        cardTitleSvg = `<text x="74" y="445" fill="#ffffff" font-size="20" font-weight="bold" font-family="DejaVu Sans, Arial, sans-serif">${escapeXml(trackCardLines[0])}</text>`;
+        cardMetaY = 475;
+    } else {
+        cardTitleSvg = `
+        <text x="74" y="434" fill="#ffffff" font-size="17" font-weight="bold" font-family="DejaVu Sans, Arial, sans-serif">${escapeXml(trackCardLines[0])}</text>
+        <text x="74" y="456" fill="#ffffff" font-size="17" font-weight="bold" font-family="DejaVu Sans, Arial, sans-serif">${escapeXml(trackCardLines[1])}</text>`;
+        cardMetaY = 482;
+    }
+
+    const metaText = `${rawArtist} • ${rawAlbum}`;
+    const safeMetaText = escapeXml(truncate(metaText, 28));
+
+    // 4. Action button text: use specific track name for short titles, or clean "Play Track →" for longer titles to prevent awkward truncation
+    let ctaText = 'Play Track →';
+    if (rawTrack.length <= 15) {
+        ctaText = `Play ${rawTrack} →`;
+    }
 
     const logoUri = logoDataUri || getLogoDataUri();
     const coverUri = coverDataUri || logoUri;
@@ -265,25 +340,23 @@ function buildSongOgSvg({ track, artist, album, coverDataUri, logoDataUri, lyric
   <rect width="1200" height="630" fill="url(#bgGrad1)"/>
   <rect width="1200" height="630" fill="url(#bgGrad2)"/>
 
-  <!-- Brand Header -->
+  <!-- Brand Header: full-width, no overlapping pill -->
   <g id="header">
     <image href="${logoUri}" x="56" y="46" width="58" height="58" clip-path="url(#logoClip)"/>
-    <text x="132" y="90" fill="#ffffff" font-size="44" font-weight="bold" font-family="DejaVu Sans Mono, monospace">TuneTyper<tspan fill="#555555" font-weight="300"> / </tspan><tspan fill="#4caf50">${safeTaglineTrack}</tspan></text>
-    <rect x="980" y="52" width="164" height="38" rx="19" fill="#4caf50" fill-opacity="0.15" stroke="#4caf50" stroke-opacity="0.35" stroke-width="1.5"/>
-    <text x="1062" y="77" fill="#4caf50" font-size="14" font-weight="bold" font-family="DejaVu Sans Mono, monospace" text-anchor="middle" letter-spacing="1.5">SONG CHALLENGE</text>
+    <text x="132" y="${headerY}" fill="#ffffff" font-size="44" font-weight="bold" font-family="DejaVu Sans Mono, monospace">TuneTyper<tspan fill="#555555" font-weight="300"> / </tspan><tspan fill="#4caf50" font-size="${headerFontSize}">${safeTrack}</tspan></text>
   </g>
 
-  <!-- Tagline -->
-  <text x="56" y="148" fill="#c0c0c0" font-size="24" font-family="DejaVu Sans, Arial, sans-serif">
-    Type the lyrics to <tspan fill="#4caf50" font-weight="bold">${safeTaglineTrack}</tspan> by <tspan fill="#ffffff" font-weight="bold">${safeTaglineArtist}</tspan>. Guess the tune &amp; beat your WPM.
+  <!-- Tagline: dynamically scaled so full track + artist are never truncated -->
+  <text x="56" y="148" fill="#c0c0c0" font-size="${taglineFontSize}" font-family="DejaVu Sans, Arial, sans-serif">
+    Type the lyrics to <tspan fill="#4caf50" font-weight="bold">${safeTrack}</tspan> by <tspan fill="#ffffff" font-weight="bold">${safeArtist}</tspan>. Guess the tune &amp; beat your WPM.
   </text>
 
-  <!-- Left: Track Card -->
+  <!-- Left: Track Card with multi-line title wrapping -->
   <g id="track-card">
     <rect x="56" y="180" width="250" height="320" rx="14" fill="#181818" stroke="#2e2e2e" stroke-width="2"/>
     <image href="${coverUri}" x="74" y="196" width="214" height="214" clip-path="url(#albumClip)"/>
-    <text x="74" y="445" fill="#ffffff" font-size="20" font-weight="bold" font-family="DejaVu Sans, Arial, sans-serif">${safeCardTrack}</text>
-    <text x="74" y="475" fill="#888888" font-size="15" font-family="DejaVu Sans, Arial, sans-serif">${safeCardMeta}</text>
+    ${cardTitleSvg}
+    <text x="74" y="${cardMetaY}" fill="#888888" font-size="14" font-family="DejaVu Sans, Arial, sans-serif">${safeMetaText}</text>
   </g>
 
   <!-- Right: In-Game Typing Display Box -->
@@ -292,18 +365,16 @@ function buildSongOgSvg({ track, artist, album, coverDataUri, logoDataUri, lyric
     ${typingLinesSvg}
   </g>
 
-  <!-- Footer -->
+  <!-- Clean Footer: URL on the left, CTA on the right -->
   <g id="footer">
-    <text x="56" y="565" fill="#4caf50" font-size="32" font-weight="bold" font-family="DejaVu Sans Mono, monospace">
-      Can you beat me?
+    <rect x="56" y="528" width="260" height="52" rx="10" fill="#1e1e1e" stroke="#333333" stroke-width="2"/>
+    <text x="186" y="562" fill="#d1d1d1" font-size="20" font-family="DejaVu Sans Mono, monospace" text-anchor="middle">
+      type.vincentchan.uk
     </text>
+
     <rect x="880" y="528" width="264" height="52" rx="10" fill="#4caf50"/>
     <text x="1012" y="562" fill="#121212" font-size="22" font-weight="bold" font-family="DejaVu Sans Mono, monospace" text-anchor="middle">
-      Play ${safeCtaTrack} &#x2192;
-    </text>
-    <rect x="610" y="528" width="250" height="52" rx="10" fill="#1e1e1e" stroke="#333333" stroke-width="2"/>
-    <text x="735" y="562" fill="#d1d1d1" font-size="20" font-family="DejaVu Sans Mono, monospace" text-anchor="middle">
-      type.vincentchan.uk
+      ${escapeXml(ctaText)}
     </text>
   </g>
 </svg>`;
@@ -426,6 +497,7 @@ function renderSongHtml(trackDetails, challenge, baseIndexHtml) {
 module.exports = {
     escapeXml,
     truncate,
+    wrapWords,
     getFontFiles,
     decodeChallengeToken,
     prepareLyricsSnippet,
