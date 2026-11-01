@@ -104,6 +104,8 @@ test.describe('Dynamic Song OpenGraph Generator & SSR Metadata', () => {
             // Verified: top-right SONG CHALLENGE pill and bottom-left "Can you beat me?" removed
             assert.ok(!svg.includes('SONG CHALLENGE'));
             assert.ok(!svg.includes('Can you beat me?'));
+            assert.ok(!svg.includes('Guess the tune'));
+            assert.ok(svg.includes('Test and train your typing speed'));
             assert.ok(svg.includes('type.vincentchan.uk'));
             assert.ok(svg.includes('Play Bad Habits &#x2192;') || svg.includes('Play Bad Habits →'));
         });
@@ -151,6 +153,31 @@ test.describe('Dynamic Song OpenGraph Generator & SSR Metadata', () => {
             assert.ok(!svg.includes('xml:space="preserve">\n'));
             assert.ok(!svg.includes('xml:space="preserve"> '));
             assert.ok(svg.includes('xml:space="preserve"><tspan'));
+        });
+
+        test('buildSongOgSvg renders typing display with 30px mono font, white active character, cursor rect, and updated tagline', () => {
+            const lyrics = "It's funny when your mom shows pictures of you in your buzzcut and scrapes on your knees changed, but you're still the same";
+            const snippet = prepareLyricsSnippet(lyrics);
+            const svg = buildSongOgSvg({
+                track: 'purple',
+                artist: 'Olivia Rodrigo',
+                lyricsSnippet: snippet
+            });
+
+            // 1. Tagline does not include 'Guess the tune'
+            assert.ok(!svg.includes('Guess the tune'));
+            assert.ok(svg.includes('Test and train your typing speed'));
+
+            // 2. Typing font is 30px DejaVu Sans Mono
+            assert.ok(svg.includes('font-size="30" font-family="DejaVu Sans Mono, monospace"'));
+
+            // 3. Active character is white with underline and cursor rect is drawn
+            assert.ok(svg.includes('fill="#ffffff" text-decoration="underline"'));
+            assert.ok(svg.includes('<rect x=') && svg.includes('width="3"') && svg.includes('fill="#ffffff" rx="1"'));
+
+            // 4. Lines fill the box and are not prematurely truncated at 42 chars
+            assert.ok(!svg.includes('in...'));
+            assert.ok(!svg.includes('changed, but...'));
         });
 
         test('bundled DejaVu font files are loaded so serverless environments without OS fonts render text', () => {
@@ -219,7 +246,7 @@ test.describe('Dynamic Song OpenGraph Generator & SSR Metadata', () => {
 
             const html = renderSongHtml(trackDetails, challenge, sampleIndexHtml);
 
-            assert.ok(html.includes('Type the lyrics to &quot;Bad Habits&quot; by Ed Sheeran, guess the tune, and test your typing speed on TuneTyper!'));
+            assert.ok(html.includes('Type the lyrics to &quot;Bad Habits&quot; by Ed Sheeran. Test and train your typing speed on TuneTyper!'));
         });
     });
 

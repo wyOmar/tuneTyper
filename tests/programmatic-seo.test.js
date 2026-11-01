@@ -519,4 +519,19 @@ test('SEO & Open Graph metadata validation', async (t) => {
             assert.ok(stat.size > 10000, `Open Graph card for ${artist.slug} should not be empty`);
         }
     });
+
+    await t.test('Artist OG templates remove Featured Artist badge, remove WPM / acc, and have merged single URL button', () => {
+        const { buildHtml, buildArtistOgSvg } = require('../scripts/generate-artist-og');
+        const sampleArtist = FEATURED_ARTISTS[0];
+        const html = buildHtml(sampleArtist, '', '');
+        assert.ok(!html.includes('Featured Artist'), 'Featured Artist badge should be removed');
+        assert.ok(!html.includes('class="wpm"'), 'WPM element should be removed from footer');
+        assert.ok(!html.includes('acc</span>'), 'Accuracy stat should be removed from artist OG card');
+        assert.ok(html.includes(`type.vincentchan.uk/${sampleArtist.slug}`), 'Merged button should contain the URL');
+
+        const svg = buildArtistOgSvg(sampleArtist, '', '');
+        assert.ok(!svg.includes('Featured Artist'));
+        assert.ok(!svg.includes('98% acc'));
+        assert.ok(svg.includes(`type.vincentchan.uk/${sampleArtist.slug}`));
+    });
 });

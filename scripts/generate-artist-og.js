@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const axios = require('axios');
+const { Resvg } = require('@resvg/resvg-js');
 const { FEATURED_ARTISTS } = require('../artists');
 
 const OUTPUT_DIR = path.join(__dirname, '..', 'public', 'og', 'artists');
@@ -351,18 +352,6 @@ function buildHtml(artist, coverDataUri, logoDataUri) {
         vertical-align: -5px;
         background: #4caf50;
     }
-    .badge {
-        font-family: "DejaVu Sans Mono", monospace;
-        font-size: 15px;
-        color: #4caf50;
-        background: rgba(76, 175, 80, 0.15);
-        border: 1px solid rgba(76, 175, 80, 0.35);
-        padding: 8px 16px;
-        border-radius: 20px;
-        text-transform: uppercase;
-        letter-spacing: 1.5px;
-        font-weight: bold;
-    }
     .tagline {
         margin-top: 14px;
         font-size: 26px;
@@ -442,38 +431,20 @@ function buildHtml(artist, coverDataUri, logoDataUri) {
     .footer {
         margin-top: auto;
         display: flex;
-        justify-content: space-between;
+        justify-content: flex-end;
         align-items: center;
         font-family: "DejaVu Sans Mono", monospace;
-    }
-    .wpm {
-        font-size: 38px;
-        font-weight: bold;
-        color: #4caf50;
-    }
-    .wpm span { font-size: 22px; color: #888; font-weight: normal; margin-left: 10px; }
-    .footer-cta {
-        display: flex;
-        align-items: center;
-        gap: 16px;
     }
     .cta-btn {
         font-size: 24px;
         font-weight: bold;
         color: #121212;
         background: #4caf50;
-        padding: 12px 24px;
+        padding: 12px 28px;
         border-radius: 10px;
         letter-spacing: 0.5px;
         box-shadow: 0 4px 14px rgba(76, 175, 80, 0.35);
-    }
-    .url {
-        font-size: 24px;
-        color: #d1d1d1;
-        padding: 12px 20px;
-        border: 2px solid #333;
-        border-radius: 10px;
-        background: #1e1e1e;
+        white-space: nowrap;
     }
 </style>
 </head>
@@ -484,7 +455,6 @@ function buildHtml(artist, coverDataUri, logoDataUri) {
                 <img src="${logoDataUri}" alt="">
                 <h1>TuneTyper<span class="sep">/</span><span class="artist">${safeArtist}</span><span class="cursor"></span></h1>
             </div>
-            <div class="badge">Featured Artist</div>
         </div>
         <p class="tagline">Type the lyrics to <strong>${safeTrackTitle}</strong>. Guess the tune &amp; beat your WPM.</p>
 
@@ -505,15 +475,186 @@ function buildHtml(artist, coverDataUri, logoDataUri) {
         </div>
 
         <div class="footer">
-            <div class="wpm">${snippet.wpm} WPM<span>98% acc</span></div>
-            <div class="footer-cta">
-                <span class="cta-btn">Play ${safeArtist} &rarr;</span>
-                <span class="url">type.vincentchan.uk/${escapeHtml(artist.slug)}</span>
-            </div>
+            <span class="cta-btn">type.vincentchan.uk/${escapeHtml(artist.slug)}</span>
         </div>
     </div>
 </body>
 </html>`;
+}
+
+/**
+ * Build 1200x630 SVG for artist Open Graph card
+ */
+function buildArtistOgSvg(artist, coverDataUri, logoDataUri) {
+    const snippet = ARTIST_OG_SNIPPETS[artist.slug] || {
+        wpm: 90,
+        done: "Type the lyrics, feel the rhythm, and sing along to every word: ",
+        ok: 'c',
+        caret: 'a',
+        todo: "n you guess the tune before time runs out?"
+    };
+
+    const leadTrack = (artist.tracks && artist.tracks[0]) || {
+        title: 'Popular Tracks',
+        album: 'Best Hits',
+        year: '2024'
+    };
+
+    const safeArtist = escapeHtml(artist.name);
+    const safeTrackTitle = escapeHtml(leadTrack.title);
+    const safeAlbum = escapeHtml(leadTrack.album);
+    const safeYear = escapeHtml(leadTrack.year || '');
+    const safeMeta = safeYear ? `${safeAlbum} &#x2022; ${safeYear}` : safeAlbum;
+
+    const urlText = 'type.vincentchan.uk/' + artist.slug;
+    const charWidth = 24 * 1233 / 2048;
+    const btnTextWidth = urlText.length * charWidth;
+    const btnWidth = Math.round(btnTextWidth + 56);
+    const btnHeight = 52;
+    const btnX = 1136 - btnWidth;
+    const btnY = 548;
+
+    // Word tokens for realistic typing display box
+    const doneWords = snippet.done.trim().split(/\s+/).filter(Boolean);
+    const todoWords = snippet.todo.trim().split(/\s+/).filter(Boolean);
+    const activeWordStr = snippet.ok + snippet.caret + (todoWords[0] || '');
+    const restTodoWords = todoWords.slice(1);
+
+    const allWordTokens = [
+        ...doneWords.map(w => ({ text: w, type: 'done' })),
+        { text: activeWordStr, type: 'active', ok: snippet.ok, caret: snippet.caret, todoWord: todoWords[0] || '' },
+        ...restTodoWords.map(w => ({ text: w, type: 'todo' }))
+    ];
+
+    const lines = [];
+    let currentLineTokens = [];
+    let currentLineLen = 0;
+    const maxCharsPerLine = 38;
+
+    for (const token of allWordTokens) {
+        const addedLen = currentLineTokens.length === 0 ? token.text.length : (1 + token.text.length);
+        if (currentLineLen + addedLen <= maxCharsPerLine) {
+            currentLineTokens.push(token);
+            currentLineLen += addedLen;
+        } else {
+            lines.push(currentLineTokens);
+            currentLineTokens = [token];
+            currentLineLen = token.text.length;
+            if (lines.length === 2) {
+                break;
+            }
+        }
+    }
+    if (lines.length < 3 && currentLineTokens.length > 0) {
+        lines.push(currentLineTokens);
+    }
+
+    const fontSize = 30;
+    const fontCharWidth = fontSize * 1233 / 2048; // ~18.06px
+    const startX = 378;
+    const lineSpacing = 48;
+    const boxCenterY = 196 + 320 / 2; // 356
+    const totalH = (lines.length - 1) * lineSpacing;
+    const startY = Math.round(boxCenterY - totalH / 2 + (fontSize * 0.35));
+
+    let displayLinesSvg = '';
+
+    lines.forEach((lineTokens, lineIdx) => {
+        const y = startY + lineIdx * lineSpacing;
+        let lineHasActive = false;
+        let activeCursorX = startX;
+        let charAcc = 0;
+
+        let tspans = '';
+        lineTokens.forEach((tok, tokIdx) => {
+            const prefixSpace = tokIdx === 0 ? '' : ' ';
+            if (tok.type === 'done') {
+                tspans += `<tspan fill="#4caf50">${escapeHtml(prefixSpace + tok.text)}</tspan>`;
+                charAcc += prefixSpace.length + tok.text.length;
+            } else if (tok.type === 'active') {
+                lineHasActive = true;
+                const okChars = tok.ok || '';
+                const caretChar = tok.caret || '';
+                const todoWordChars = tok.todoWord || '';
+                if (prefixSpace) {
+                    tspans += `<tspan fill="#4caf50"> </tspan>`;
+                    charAcc += 1;
+                }
+                const caretCharPos = charAcc + okChars.length;
+                activeCursorX = startX + caretCharPos * fontCharWidth;
+
+                tspans += `<tspan fill="#4caf50" text-decoration="underline">${escapeHtml(okChars)}</tspan>`;
+                tspans += `<tspan fill="#ffffff" text-decoration="underline">${escapeHtml(caretChar)}</tspan>`;
+                if (todoWordChars) {
+                    tspans += `<tspan fill="#7e7e7e">${escapeHtml(todoWordChars)}</tspan>`;
+                }
+                charAcc += okChars.length + caretChar.length + todoWordChars.length;
+            } else {
+                tspans += `<tspan fill="#7e7e7e">${escapeHtml(prefixSpace + tok.text)}</tspan>`;
+                charAcc += prefixSpace.length + tok.text.length;
+            }
+        });
+
+        if (lineHasActive) {
+            const cursorY = y - fontSize * 0.82;
+            const cursorH = fontSize * 1.02;
+            displayLinesSvg += `<rect x="${activeCursorX.toFixed(1)}" y="${cursorY.toFixed(1)}" width="3" height="${cursorH.toFixed(1)}" fill="#ffffff" rx="1"/>\n        `;
+        }
+        displayLinesSvg += `<text x="${startX}" y="${y}" font-size="${fontSize}" font-family="DejaVu Sans Mono, monospace" xml:space="preserve">${tspans}</text>\n        `;
+    });
+
+    const artistCursorX = 140 + ('TuneTyper / ' + artist.name).length * 26.5;
+
+    return `<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg1" cx="92%" cy="14%" r="45%">
+      <stop offset="0%" stop-color="#4caf50" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#121212" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="bg2" cx="6%" cy="96%" r="42%">
+      <stop offset="0%" stop-color="#4caf50" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#121212" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="logoClip"><rect x="64" y="46" width="58" height="58" rx="12"/></clipPath>
+    <clipPath id="coverClip"><rect x="82" y="212" width="214" height="214" rx="10"/></clipPath>
+  </defs>
+
+  <rect width="1200" height="630" fill="#121212"/>
+  <rect width="1200" height="630" fill="url(#bg1)"/>
+  <rect width="1200" height="630" fill="url(#bg2)"/>
+
+  <!-- Brand -->
+  <image href="${logoDataUri}" x="64" y="46" width="58" height="58" clip-path="url(#logoClip)"/>
+  <text x="140" y="90" fill="#ffffff" font-size="44" font-weight="bold" font-family="DejaVu Sans Mono, monospace">TuneTyper<tspan fill="#555555" font-weight="300"> / </tspan><tspan fill="#ffffff">${safeArtist}</tspan></text>
+  <rect x="${artistCursorX.toFixed(1)}" y="58" width="5" height="38" fill="#4caf50"/>
+
+  <!-- Tagline -->
+  <text x="64" y="146" fill="#c0c0c0" font-size="26" font-family="DejaVu Sans, Arial, sans-serif">
+    Type the lyrics to <tspan fill="#4caf50" font-weight="bold">${safeTrackTitle}</tspan>. Guess the tune &amp; beat your WPM.
+  </text>
+
+  <!-- Track Card -->
+  <g id="track-card">
+    <rect x="64" y="196" width="250" height="320" rx="14" fill="#181818" stroke="#2e2e2e" stroke-width="2"/>
+    <image href="${coverDataUri}" x="82" y="212" width="214" height="214" clip-path="url(#coverClip)"/>
+    <text x="82" y="462" fill="#ffffff" font-size="20" font-weight="bold" font-family="DejaVu Sans, Arial, sans-serif">${safeTrackTitle}</text>
+    <text x="82" y="490" fill="#888888" font-size="14" font-family="DejaVu Sans, Arial, sans-serif">${safeMeta}</text>
+  </g>
+
+  <!-- Display Box -->
+  <g id="display-box">
+    <rect x="346" y="196" width="790" height="320" rx="14" fill="#1e1e1e" stroke="#333333" stroke-width="2"/>
+    ${displayLinesSvg}
+  </g>
+
+  <!-- Footer with single merged URL button -->
+  <g id="footer">
+    <rect x="${btnX}" y="${btnY}" width="${btnWidth}" height="${btnHeight}" rx="10" fill="#4caf50"/>
+    <text x="${btnX + btnWidth / 2}" y="${btnY + 34}" fill="#121212" font-size="24" font-weight="bold" font-family="DejaVu Sans Mono, monospace" text-anchor="middle">
+      ${urlText}
+    </text>
+  </g>
+</svg>`;
 }
 
 async function generateAll() {
@@ -526,30 +667,37 @@ async function generateAll() {
     const logoBuffer = fs.readFileSync(LOGO_PATH);
     const logoDataUri = `data:image/png;base64,${logoBuffer.toString('base64')}`;
 
-    const tempDir = path.join(__dirname, '..', 'assets', 'temp-og');
-    if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-    }
+    const fontDir = path.join(__dirname, '..', 'assets', 'fonts');
+    const fontFiles = [
+        path.join(fontDir, 'DejaVuSans.ttf'),
+        path.join(fontDir, 'DejaVuSans-Bold.ttf'),
+        path.join(fontDir, 'DejaVuSansMono.ttf'),
+        path.join(fontDir, 'DejaVuSansMono-Bold.ttf')
+    ].filter(f => fs.existsSync(f));
 
     let generatedCount = 0;
 
     for (let i = 0; i < FEATURED_ARTISTS.length; i++) {
         const artist = FEATURED_ARTISTS[i];
         const outPng = path.join(OUTPUT_DIR, `${artist.slug}.png`);
-        const tempHtml = path.join(tempDir, `${artist.slug}.html`);
 
         process.stdout.write(`[${i + 1}/${FEATURED_ARTISTS.length}] Generating ${artist.name} (${artist.slug})... `);
-
         try {
             const coverDataUri = await getCoverDataUri(artist);
-            const html = buildHtml(artist, coverDataUri, logoDataUri);
-            fs.writeFileSync(tempHtml, html);
+            const svg = buildArtistOgSvg(artist, coverDataUri, logoDataUri);
 
-            // Execute headless Firefox screenshot
-            execSync(
-                `firefox --headless --screenshot="${outPng}" --window-size=1200,630 "file://${tempHtml}"`,
-                { stdio: 'ignore' }
-            );
+            const resvg = new Resvg(svg, {
+                font: {
+                    fontFiles: fontFiles.length > 0 ? fontFiles : undefined,
+                    loadSystemFonts: true,
+                    monospaceFamily: 'DejaVu Sans Mono',
+                    sansSerifFamily: 'DejaVu Sans'
+                },
+                fitTo: { mode: 'width', value: 1200 }
+            });
+
+            const pngBuffer = resvg.render().asPng();
+            fs.writeFileSync(outPng, pngBuffer);
 
             if (fs.existsSync(outPng) && fs.statSync(outPng).size > 10000) {
                 const sizeKb = Math.round(fs.statSync(outPng).size / 1024);
@@ -560,15 +708,7 @@ async function generateAll() {
             }
         } catch (err) {
             process.stdout.write(`ERROR: ${err.message}\n`);
-        } finally {
-            if (fs.existsSync(tempHtml)) {
-                fs.unlinkSync(tempHtml);
-            }
         }
-    }
-
-    if (fs.existsSync(tempDir)) {
-        fs.rmSync(tempDir, { recursive: true, force: true });
     }
 
     console.log(`\nSuccessfully generated ${generatedCount}/${FEATURED_ARTISTS.length} artist social preview cards in public/og/artists/`);
@@ -584,5 +724,6 @@ if (require.main === module) {
 module.exports = {
     ARTIST_OG_SNIPPETS,
     buildHtml,
+    buildArtistOgSvg,
     generateAll
 };
