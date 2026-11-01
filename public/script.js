@@ -2404,8 +2404,6 @@ function renderArtistPopularTracksShelf(artistName, tracks) {
         const safeCover = escapeHtml(cover);
         const trackArtist = (track.artist && track.artist.name) ? track.artist.name : artistName;
         const safeArtist = escapeHtml(trackArtist);
-        const safeYear = track.release_date ? escapeHtml(track.release_date.slice(0, 4)) : '';
-        const metaText = safeYear ? `${safeAlbum} · ${safeYear}` : safeAlbum;
 
         return [
             `        <button type="button" class="artist-track-card" data-artist="${safeArtist}" data-track="${safeTitle}">`,
@@ -2414,7 +2412,6 @@ function renderArtistPopularTracksShelf(artistName, tracks) {
             `                <span class="track-card-overlay" aria-hidden="true">▶ Type</span>`,
             `            </span>`,
             `            <span class="track-card-title">${safeTitle}</span>`,
-            `            <span class="track-card-meta">${metaText}</span>`,
             `        </button>`
         ].join('\n');
     }).join('\n');

@@ -1287,6 +1287,7 @@ h1 {
     flex-direction: column;
     gap: 7px;
     transition: transform 0.14s ease, border-color 0.14s ease, background-color 0.14s ease;
+    container-type: inline-size;
 }
 
 .artist-track-card:hover,
@@ -1307,9 +1308,8 @@ h1 {
     background: #1c2b1e;
 }
 
-.playlist-card.active .track-card-overlay {
-    opacity: 1;
-    background: rgba(46, 125, 50, 0.88);
+.playlist-card .track-card-overlay {
+    display: none;
 }
 
 .track-card-cover-wrap {
@@ -1350,9 +1350,11 @@ h1 {
 
 .track-card-title {
     font-family: monospace;
-    font-size: 12.5px;
+    font-size: clamp(13px, 1.35vw, 15px);
+    font-size: clamp(13px, 8.5cqi, 15.5px);
     font-weight: bold;
     color: #eee;
+    line-height: 1.35;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
