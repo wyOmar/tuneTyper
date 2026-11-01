@@ -2652,7 +2652,8 @@ function triggerOmniboxAutocomplete(rawQuery) {
         renderSearchSuggestions(immediate);
     }
 
-    if (cachedRemote) return;
+    // Do not query remote Deezer /suggest for single characters; rely purely on local curated matches
+    if (cachedRemote || cacheKey.length < 2) return;
 
     // 2. Debounced fetch to Edge-cached /suggest endpoint using normalized cacheKey so CDN hit rates stay high
     debounceOmniboxTimeout = setTimeout(async () => {

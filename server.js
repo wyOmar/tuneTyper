@@ -485,6 +485,11 @@ app.get('/tracks', requireGameClient, async (req, res) => {
                     `https://api.deezer.com/search?limit=50&q=${encodeURIComponent(artist)}`,
                     { timeout: 8000 }
                 );
+                if (response.data && response.data.error) {
+                    const err = new Error(response.data.error.message || 'Deezer search error');
+                    err.statusCode = (response.data.error.code === 4) ? 429 : 502;
+                    throw err;
+                }
                 const rawList = (response.data && Array.isArray(response.data.data))
                     ? response.data.data
                     : [];
@@ -504,7 +509,8 @@ app.get('/tracks', requireGameClient, async (req, res) => {
     } catch (error) {
         console.error('Error fetching tracks:', error.message);
         res.setHeader('Cache-Control', 'no-store');
-        res.status(500).send('Failed to fetch tracks.');
+        const status = error.statusCode || 500;
+        res.status(status).send('Failed to fetch tracks.');
     }
 });
 
@@ -512,6 +518,11 @@ app.get('/tracks', requireGameClient, async (req, res) => {
 app.get('/suggest', requireGameClient, async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
     if (!q) return res.status(400).send('Query parameter q is required.');
+
+    // Reject single-character remote queries to shield Deezer rate limits
+    if (q.length < 2) {
+        return res.json({ artists: [], tracks: [] });
+    }
 
     const key = suggestCacheKey(q);
 
@@ -526,6 +537,11 @@ app.get('/suggest', requireGameClient, async (req, res) => {
                     `https://api.deezer.com/search?limit=20&q=${encodeURIComponent(q)}`,
                     { timeout: 8000 }
                 );
+                if (response.data && response.data.error) {
+                    const err = new Error(response.data.error.message || 'Deezer suggest error');
+                    err.statusCode = (response.data.error.code === 4) ? 429 : 502;
+                    throw err;
+                }
                 const items = (response.data && Array.isArray(response.data.data)) ? response.data.data : [];
 
                 const seenArtists = new Set();
@@ -579,7 +595,8 @@ app.get('/suggest', requireGameClient, async (req, res) => {
     } catch (error) {
         console.error('Error fetching search suggestions:', error.message);
         res.setHeader('Cache-Control', 'no-store');
-        res.status(500).send('Failed to fetch suggestions.');
+        const status = error.statusCode || 500;
+        res.status(status).send('Failed to fetch suggestions.');
     }
 });
 
@@ -603,6 +620,11 @@ app.get('/top-tracks', requireGameClient, async (req, res) => {
                     `https://api.deezer.com/artist/${encodeURIComponent(artistId)}/top?limit=${limit}`,
                     { timeout: 8000 }
                 );
+                if (response.data && response.data.error) {
+                    const err = new Error(response.data.error.message || 'Deezer top tracks error');
+                    err.statusCode = (response.data.error.code === 4) ? 429 : 502;
+                    throw err;
+                }
                 const rawList = (response.data && Array.isArray(response.data.data))
                     ? response.data.data
                     : [];
@@ -620,7 +642,8 @@ app.get('/top-tracks', requireGameClient, async (req, res) => {
     } catch (error) {
         console.error('Error fetching top tracks:', error.message);
         res.setHeader('Cache-Control', 'no-store');
-        res.status(500).send('Failed to fetch top tracks.');
+        const status = error.statusCode || 500;
+        res.status(status).send('Failed to fetch top tracks.');
     }
 });
 
@@ -655,6 +678,11 @@ async function getPlaylistTracks(playlistId, options = {}) {
                 `https://api.deezer.com/playlist/${encodeURIComponent(resolvedId)}`,
                 { timeout: 8000 }
             );
+            if (response.data && response.data.error) {
+                const err = new Error(response.data.error.message || 'Deezer playlist error');
+                err.statusCode = (response.data.error.code === 4) ? 429 : 502;
+                throw err;
+            }
             const rawTracks = (response.data && response.data.tracks && Array.isArray(response.data.tracks.data))
                 ? response.data.tracks.data
                 : [];

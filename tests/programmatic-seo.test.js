@@ -298,6 +298,44 @@ test('Express SSR artist landing routes, Edge-cached /suggest & 404 protection',
             axios.get = origGet;
         }
     });
+
+    await t.test('GET /suggest?q=a returns empty results without querying remote Deezer for single-char queries', async () => {
+        let axiosCalled = false;
+        const origGet = axios.get;
+        axios.get = async () => {
+            axiosCalled = true;
+            return { data: { data: [] } };
+        };
+        try {
+            const res = await requestApp(server, '/suggest?q=a');
+            assert.equal(res.statusCode, 200);
+            const parsed = JSON.parse(res.body);
+            assert.deepEqual(parsed, { artists: [], tracks: [] });
+            assert.equal(axiosCalled, false, 'Single-character queries must never call upstream Deezer');
+        } finally {
+            axios.get = origGet;
+        }
+    });
+
+    await t.test('GET /suggest rejects Deezer rate limit error payloads (code: 4) with 429 and Cache-Control: no-store', async () => {
+        const origGet = axios.get;
+        axios.get = async () => ({
+            data: {
+                error: {
+                    type: 'Exception',
+                    message: 'Quota limit exceeded',
+                    code: 4
+                }
+            }
+        });
+        try {
+            const res = await requestApp(server, '/suggest?q=uncommonquery');
+            assert.equal(res.statusCode, 429);
+            assert.equal(res.headers['cache-control'], 'no-store', 'Rate-limited responses must never be cached at Edge CDN');
+        } finally {
+            axios.get = origGet;
+        }
+    });
 });
 
 test('Unified ARTIST / SONG omnibox ranking & game-mode decoupling', async (t) => {
