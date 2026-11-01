@@ -1,5 +1,8 @@
 {
   "version": 2,
+  "regions": [
+    "lhr1"
+  ],
   "builds": [
     {
       "src": "server.js",

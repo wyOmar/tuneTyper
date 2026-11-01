@@ -181,6 +181,8 @@ test('Express SSR artist landing routes, Edge-cached /suggest & 404 protection',
     await t.test('GET /eminem renders distinct cover-art track cards and artist OG image from /taylor-swift', async () => {
         const res = await requestApp(server, '/eminem');
         assert.equal(res.statusCode, 200);
+        assert.match(res.headers['cache-control'], /s-maxage=86400/);
+        assert.equal(res.headers['vary'], 'Accept-Encoding');
         assert.match(res.body, /<h1 class="artist-shelf-title">Eminem/);
         assert.match(res.body, /data-track="Lose Yourself"/);
         assert.doesNotMatch(res.body, /data-track="Cruel Summer"/);
@@ -214,16 +216,29 @@ test('Express SSR artist landing routes, Edge-cached /suggest & 404 protection',
         assert.equal(botRes.statusCode, 404);
     });
 
-    await t.test('GET /sitemap.xml serves valid XML with application/xml content-type', async () => {
+    await t.test('GET / serves index.html with Edge Cache-Control, Vary, and resource hints', async () => {
+        const res = await requestApp(server, '/');
+        assert.equal(res.statusCode, 200);
+        assert.match(res.headers['cache-control'], /s-maxage=86400/);
+        assert.equal(res.headers['vary'], 'Accept-Encoding');
+        assert.match(res.body, /<title>TuneTyper/);
+        assert.match(res.body, /rel="preload" href="\/script\.js"/);
+        assert.match(res.body, /rel="preconnect" href="https:\/\/cdn-images\.dzcdn\.net"/);
+    });
+
+    await t.test('GET /sitemap.xml serves valid XML with application/xml content-type and Edge Cache-Control', async () => {
         const res = await requestApp(server, '/sitemap.xml');
         assert.equal(res.statusCode, 200);
         assert.match(res.headers['content-type'], /xml/);
+        assert.match(res.headers['cache-control'], /s-maxage=86400/);
+        assert.equal(res.headers['vary'], 'Accept-Encoding');
         assert.match(res.body, /<loc>https:\/\/type\.vincentchan\.uk\/sabrina-carpenter<\/loc>/);
     });
 
-    await t.test('GET /favicon.ico returns 200', async () => {
+    await t.test('GET /favicon.ico returns 200 with Edge Cache-Control', async () => {
         const res = await requestApp(server, '/favicon.ico');
         assert.equal(res.statusCode, 200);
+        assert.match(res.headers['cache-control'], /s-maxage=604800/);
     });
 
     await t.test('Reserved API routes /tracks and /suggest are not shadowed by /:slug', async () => {
