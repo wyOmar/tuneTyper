@@ -43,6 +43,20 @@ function truncate(str, maxLength) {
 }
 
 /**
+ * Truncate a string cleanly at word boundaries and append ellipsis
+ */
+function truncateAtWord(str, maxLength = 42) {
+    if (!str || typeof str !== 'string') return '';
+    if (str.length <= maxLength) return str;
+    const truncated = str.slice(0, maxLength);
+    const lastSpace = truncated.lastIndexOf(' ');
+    if (lastSpace > 0) {
+        return truncated.slice(0, lastSpace) + '…';
+    }
+    return truncated + '…';
+}
+
+/**
  * Standalone binary challenge token decoder (Node.js & browser safe, zero DOM dependencies)
  * Supports:
  * - v3: 12-byte binary packed with Deezer trackId (16 Base64URL chars)
@@ -162,7 +176,7 @@ function prepareLyricsSnippet(rawLyrics, options = {}) {
     if (rawLines.length === 0) return null;
 
     // Take up to 4 readable lines
-    const lines = rawLines.slice(0, 4).map(l => truncate(l, 44));
+    const lines = rawLines.slice(0, 4).map(l => truncateAtWord(l, 42));
     if (lines.length === 0) return null;
 
     // In the first line, highlight the first word or two as "done" (green)
@@ -286,35 +300,20 @@ function buildSongOgSvg({ track, artist, album, coverDataUri, logoDataUri, lyric
     let typingLinesSvg = '';
     if (lyricsSnippet && lyricsSnippet.line1) {
         const { done, current, todo } = lyricsSnippet.line1;
-        typingLinesSvg += `
-        <text x="366" y="265" font-size="28" font-family="DejaVu Sans Mono, monospace" xml:space="preserve">
-          <tspan fill="#4caf50">${escapeXml(done)}</tspan><tspan fill="#4caf50" text-decoration="underline">${escapeXml(current)}</tspan><tspan fill="#7e7e7e">${escapeXml(todo)}</tspan>
-        </text>`;
+        typingLinesSvg += `<text x="366" y="255" font-size="26" font-family="DejaVu Sans Mono, monospace" xml:space="preserve"><tspan fill="#4caf50">${escapeXml(done)}</tspan><tspan fill="#4caf50" text-decoration="underline">${escapeXml(current)}</tspan><tspan fill="#7e7e7e">${escapeXml(todo)}</tspan></text>`;
 
-        const startY = 320;
-        const lineSpacing = 52;
+        const startY = 312;
+        const lineSpacing = 54;
         lyricsSnippet.remainingLines.forEach((line, index) => {
             const y = startY + index * lineSpacing;
-            typingLinesSvg += `
-        <text x="366" y="${y}" font-size="28" font-family="DejaVu Sans Mono, monospace" xml:space="preserve">
-          <tspan fill="#7e7e7e">${escapeXml(line)}</tspan>
-        </text>`;
+            typingLinesSvg += `\n        <text x="366" y="${y}" font-size="26" font-family="DejaVu Sans Mono, monospace" xml:space="preserve"><tspan fill="#7e7e7e">${escapeXml(line)}</tspan></text>`;
         });
     } else {
         // Fallback display when lyrics are instrumental or unavailable
-        typingLinesSvg = `
-        <text x="366" y="270" font-size="30" font-family="DejaVu Sans Mono, monospace">
-          <tspan fill="#4caf50">&#x266A; </tspan><tspan fill="#ffffff" font-weight="bold">Type the lyrics to this track</tspan>
-        </text>
-        <text x="366" y="325" font-size="26" font-family="DejaVu Sans Mono, monospace">
-          <tspan fill="#7e7e7e">Test your speed &amp; guess the song</tspan>
-        </text>
-        <text x="366" y="380" font-size="26" font-family="DejaVu Sans Mono, monospace">
-          <tspan fill="#7e7e7e">Play free in your browser at</tspan>
-        </text>
-        <text x="366" y="435" font-size="26" font-family="DejaVu Sans Mono, monospace">
-          <tspan fill="#4caf50">type.vincentchan.uk</tspan>
-        </text>`;
+        typingLinesSvg = `<text x="366" y="270" font-size="30" font-family="DejaVu Sans Mono, monospace"><tspan fill="#4caf50">&#x266A; </tspan><tspan fill="#ffffff" font-weight="bold">Type the lyrics to this track</tspan></text>
+        <text x="366" y="325" font-size="26" font-family="DejaVu Sans Mono, monospace"><tspan fill="#7e7e7e">Test your speed &amp; guess the song</tspan></text>
+        <text x="366" y="380" font-size="26" font-family="DejaVu Sans Mono, monospace"><tspan fill="#7e7e7e">Play free in your browser at</tspan></text>
+        <text x="366" y="435" font-size="26" font-family="DejaVu Sans Mono, monospace"><tspan fill="#4caf50">type.vincentchan.uk</tspan></text>`;
     }
 
     return `<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
@@ -497,6 +496,7 @@ function renderSongHtml(trackDetails, challenge, baseIndexHtml) {
 module.exports = {
     escapeXml,
     truncate,
+    truncateAtWord,
     wrapWords,
     getFontFiles,
     decodeChallengeToken,
