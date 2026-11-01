@@ -72,7 +72,7 @@ function trackDetailsCacheKey(trackId) {
 }
 
 function ogSongImageCacheKey(trackId) {
-    return `${CACHE_PREFIX}:og-song:v3:${String(trackId).trim()}`;
+    return `${CACHE_PREFIX}:og-song:v4:${String(trackId).trim()}`;
 }
 
 const UNWANTED_ARTIST_PATTERNS = [

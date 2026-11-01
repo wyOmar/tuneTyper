@@ -5,6 +5,7 @@ const http = require('http');
 const {
     escapeXml,
     truncate,
+    truncateAtWord,
     wrapWords,
     getFontFiles,
     decodeChallengeToken,
@@ -31,6 +32,13 @@ test.describe('Dynamic Song OpenGraph Generator & SSR Metadata', () => {
             assert.equal(truncate('This is a very long track title that will overflow the card', 25), 'This is a very long trac…');
             assert.equal(truncate('', 10), '');
             assert.equal(truncate(null, 10), '');
+        });
+
+        test('truncateAtWord truncates at word boundaries rather than slicing mid-word', () => {
+            assert.equal(truncateAtWord("Now I've been drownin' in this liquor bottle", 42), "Now I've been drownin' in this liquor…");
+            assert.equal(truncateAtWord('Short sentence', 42), 'Short sentence');
+            assert.equal(truncateAtWord('', 42), '');
+            assert.equal(truncateAtWord(null, 42), '');
         });
 
         test('wrapWords wraps text at word boundaries into multiple lines without truncating words', () => {
@@ -129,6 +137,20 @@ test.describe('Dynamic Song OpenGraph Generator & SSR Metadata', () => {
 
             assert.ok(svg.includes('Type the lyrics to this track'));
             assert.ok(svg.includes('Instrumental Symphony'));
+        });
+
+        test('buildSongOgSvg produces clean text tags without template literal indentation inside xml:space="preserve"', () => {
+            const svg = buildSongOgSvg({
+                track: 'Not Enough',
+                artist: 'Juice WRLD',
+                album: 'Fighting Demons',
+                lyricsSnippet: prepareLyricsSnippet("She said it's not enough\nOh-oh-oh, uh\nNow I've been drownin' in this liquor bottle\nThey tell me that I won't live to see tomorrow")
+            });
+
+            // Ensure no leading spaces or newlines immediately follow xml:space="preserve"> before <tspan
+            assert.ok(!svg.includes('xml:space="preserve">\n'));
+            assert.ok(!svg.includes('xml:space="preserve"> '));
+            assert.ok(svg.includes('xml:space="preserve"><tspan'));
         });
 
         test('bundled DejaVu font files are loaded so serverless environments without OS fonts render text', () => {
