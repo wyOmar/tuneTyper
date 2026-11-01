@@ -649,8 +649,59 @@ app.get('/track-details', async (req, res) => {
     }
 });
 
+/**
+ * Guard middleware for internal game APIs:
+ * - Direct browser address-bar navigation (Sec-Fetch-Dest: document, Sec-Fetch-Mode: navigate)
+ *   is redirected back to the game UI rather than dumping raw JSON.
+ * - Cross-origin hotlinking from unauthorized external domains is rejected.
+ * - Requires in-app request header (X-Requested-With: TuneTyper) to prevent external scraping.
+ */
+function requireGameClient(req, res, next) {
+    const fetchDest = req.headers['sec-fetch-dest'];
+    const fetchMode = req.headers['sec-fetch-mode'];
+    const accept = req.headers['accept'] || '';
+
+    // Direct browser URL bar navigation (e.g. typing /lyrics into address bar)
+    if (fetchDest === 'document' || fetchMode === 'navigate' || (accept.includes('text/html') && !req.headers['x-requested-with'])) {
+        return res.redirect(302, '/');
+    }
+
+    // Disallow cross-origin hotlinking from unauthorized third-party domains
+    const origin = req.headers['origin'];
+    const referer = req.headers['referer'];
+    const host = req.headers['host'];
+
+    if (origin) {
+        try {
+            const originHost = new URL(origin).host;
+            if (host && originHost !== host && !originHost.includes('localhost') && !originHost.includes('127.0.0.1')) {
+                return res.status(403).json({ error: 'Forbidden: cross-origin API access is disabled.' });
+            }
+        } catch (_) {}
+    }
+
+    if (referer) {
+        try {
+            const refererHost = new URL(referer).host;
+            if (host && refererHost !== host && !refererHost.includes('localhost') && !refererHost.includes('127.0.0.1')) {
+                return res.status(403).json({ error: 'Forbidden: unauthorized referer.' });
+            }
+        } catch (_) {}
+    }
+
+    // Require internal game client header
+    const requestedWith = req.headers['x-requested-with'];
+    if (requestedWith !== 'TuneTyper') {
+        return res.status(403).json({
+            error: 'Forbidden: direct API access is disabled. Play TuneTyper at https://type.vincentchan.uk'
+        });
+    }
+
+    next();
+}
+
 // OVH Lyrics API Route (cached 7-day rolling in Redis & 30d at Vercel CDN Edge)
-app.get('/lyrics', async (req, res) => {
+app.get('/lyrics', requireGameClient, async (req, res) => {
     const artist = typeof req.query.artist === 'string' ? req.query.artist.trim() : '';
     const track = typeof req.query.track === 'string' ? req.query.track.trim() : '';
     if (!artist || !track) return res.status(400).send('Artist and track name are required.');
@@ -708,6 +759,7 @@ app._warmUkTop40Cache = warmUkTop40Cache;
 app._warmCuratedPlaylistsCache = warmCuratedPlaylistsCache;
 app._getPlaylistTracks = getPlaylistTracks;
 app._fetchAndCacheLyrics = fetchAndCacheLyrics;
+app._requireGameClient = requireGameClient;
 
 // @vercel/node requires the default export of server.js to be a request handler function or http.Server
 module.exports = app;

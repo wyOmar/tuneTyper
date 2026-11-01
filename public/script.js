@@ -178,7 +178,11 @@ async function fetchLyrics(artist, track) {
     const normTrack = String(track || '').trim().toLowerCase();
     let response;
     try {
-        response = await fetch(`/lyrics?artist=${encodeURIComponent(normArtist)}&track=${encodeURIComponent(normTrack)}`);
+        response = await fetch(`/lyrics?artist=${encodeURIComponent(normArtist)}&track=${encodeURIComponent(normTrack)}`, {
+            headers: {
+                'X-Requested-With': 'TuneTyper'
+            }
+        });
     } finally {
         stopLoadingBar();
     }

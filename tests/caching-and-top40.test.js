@@ -225,10 +225,13 @@ test('Express Edge headers, read-through lyrics/Deezer caching & 24/7 UK Top 40 
             throw err;
         };
 
+        const appHeaders = { 'x-requested-with': 'TuneTyper' };
+
         // 1. Collaboration title falls back to stripped base title and caches under both keys
         const first = await requestApp(
             server,
-            '/lyrics?artist=Post%20Malone&track=I%20Had%20Some%20Help%20(feat.%20Morgan%20Wallen)'
+            '/lyrics?artist=Post%20Malone&track=I%20Had%20Some%20Help%20(feat.%20Morgan%20Wallen)',
+            { headers: appHeaders }
         );
         assert.equal(first.statusCode, 200);
         assert.match(first.headers['cache-control'], /s-maxage=2592000/);
@@ -239,22 +242,62 @@ test('Express Edge headers, read-through lyrics/Deezer caching & 24/7 UK Top 40 
         // 2. Repeat request with different casing hits cache with 0 OVH calls
         const second = await requestApp(
             server,
-            '/lyrics?artist=post%20malone&track=i%20had%20some%20help%20(feat.%20morgan%20wallen)'
+            '/lyrics?artist=post%20malone&track=i%20had%20some%20help%20(feat.%20morgan%20wallen)',
+            { headers: appHeaders }
         );
         assert.equal(second.statusCode, 200);
         assert.equal(second.headers['x-cache'], 'HIT');
         assert.equal(ovhCalls, 2, 'Cached song must make 0 additional OVH calls');
 
         // 3. Missing track returns 404 with 24h negative cache and does not re-hit OVH
-        const miss1 = await requestApp(server, '/lyrics?artist=Unknown&track=Nonexistent');
+        const miss1 = await requestApp(server, '/lyrics?artist=Unknown&track=Nonexistent', { headers: appHeaders });
         assert.equal(miss1.statusCode, 404);
         assert.match(miss1.headers['cache-control'], /s-maxage=86400/);
         const callsAfterFirstMiss = ovhCalls;
 
-        const miss2 = await requestApp(server, '/lyrics?artist=unknown&track=nonexistent');
+        const miss2 = await requestApp(server, '/lyrics?artist=unknown&track=nonexistent', { headers: appHeaders });
         assert.equal(miss2.statusCode, 404);
         assert.equal(miss2.headers['x-cache'], 'HIT-MISS');
         assert.equal(ovhCalls, callsAfterFirstMiss, 'Negative-cached 404 must not hammer lyrics.ovh again');
+    });
+
+    await t.test('GET /lyrics blocks direct browser navigation, foreign origins, and unauthenticated scrapers', async () => {
+        // 1. Direct browser URL bar paste (Sec-Fetch-Dest: document) redirects to homepage
+        const navRes = await requestApp(server, '/lyrics?artist=Sabrina%20Carpenter&track=Opposite', {
+            headers: {
+                'sec-fetch-dest': 'document',
+                'sec-fetch-mode': 'navigate',
+                'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            }
+        });
+        assert.equal(navRes.statusCode, 302);
+        assert.equal(navRes.headers['location'], '/');
+
+        // 2. Direct curl/browser access without X-Requested-With header returns 403 Forbidden
+        const directRes = await requestApp(server, '/lyrics?artist=Sabrina%20Carpenter&track=Opposite');
+        assert.equal(directRes.statusCode, 403);
+        const directBody = JSON.parse(directRes.body);
+        assert.match(directBody.error, /direct API access is disabled/i);
+
+        // 3. Cross-origin request from third-party domain returns 403 Forbidden
+        const crossRes = await requestApp(server, '/lyrics?artist=Sabrina%20Carpenter&track=Opposite', {
+            headers: {
+                'x-requested-with': 'TuneTyper',
+                'origin': 'https://third-party-scraper.com'
+            }
+        });
+        assert.equal(crossRes.statusCode, 403);
+        const crossBody = JSON.parse(crossRes.body);
+        assert.match(crossBody.error, /cross-origin API access is disabled/i);
+
+        // 4. Authorized request from TuneTyper frontend succeeds
+        const legitRes = await requestApp(server, '/lyrics?artist=Post%20Malone&track=I%20Had%20Some%20Help%20(feat.%20Morgan%20Wallen)', {
+            headers: {
+                'x-requested-with': 'TuneTyper'
+            }
+        });
+        assert.equal(legitRes.statusCode, 200);
+        assert.match(JSON.parse(legitRes.body).lyrics, /make this kind of mess/);
     });
 
     await t.test('GET /tracks, /top-tracks, and /track-details decouple expiring preview tokens & serve Edge Cache-Control', async () => {
@@ -399,7 +442,8 @@ test('Express Edge headers, read-through lyrics/Deezer caching & 24/7 UK Top 40 
         for (const track of defaultBody.tracks.data) {
             const lyrRes = await requestApp(
                 server,
-                `/lyrics?artist=${encodeURIComponent(track.artist.name)}&track=${encodeURIComponent(track.title)}`
+                `/lyrics?artist=${encodeURIComponent(track.artist.name)}&track=${encodeURIComponent(track.title)}`,
+                { headers: { 'x-requested-with': 'TuneTyper' } }
             );
             assert.equal(lyrRes.statusCode, 200);
             assert.equal(lyrRes.headers['x-cache'], 'HIT');
