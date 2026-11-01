@@ -5,6 +5,7 @@ const http = require('http');
 const {
     escapeXml,
     truncate,
+    getFontFiles,
     decodeChallengeToken,
     prepareLyricsSnippet,
     buildSongOgSvg,
@@ -97,6 +98,13 @@ test.describe('Dynamic Song OpenGraph Generator & SSR Metadata', () => {
 
             assert.ok(svg.includes('Type the lyrics to this track'));
             assert.ok(svg.includes('Instrumental Symphony'));
+        });
+
+        test('bundled DejaVu font files are loaded so serverless environments without OS fonts render text', () => {
+            const fontFiles = getFontFiles();
+            assert.ok(Array.isArray(fontFiles) && fontFiles.length >= 2, `Expected at least 2 font files, got ${fontFiles.length}`);
+            assert.ok(fontFiles.some(f => f.includes('DejaVuSans.ttf')));
+            assert.ok(fontFiles.some(f => f.includes('DejaVuSansMono.ttf')));
         });
 
         test('generateSongOgImage produces valid PNG buffer (89 50 4E 47)', async () => {
