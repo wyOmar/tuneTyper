@@ -173,14 +173,19 @@ test('Express SSR artist landing routes, Edge-cached /suggest & 404 protection',
         assert.match(res.body, /<a href="\/taylor-swift" aria-current="page">/);
         assert.match(res.body, /id="artist-input" value="Taylor Swift"/);
         assert.match(res.body, /window\.__INITIAL_ARTIST__\s*=\s*\{"slug":"taylor-swift","name":"Taylor Swift"\}/);
+        assert.match(res.body, /<meta property="og:image" content="https:\/\/type\.vincentchan\.uk\/og\/artists\/taylor-swift\.png">/);
+        assert.match(res.body, /<meta name="twitter:image" content="https:\/\/type\.vincentchan\.uk\/og\/artists\/taylor-swift\.png">/);
+        assert.match(res.body, /<meta property="og:image:alt" content="TuneTyper typing challenge for Taylor Swift: type Cruel Summer lyrics and beat your WPM\.">/);
     });
 
-    await t.test('GET /eminem renders distinct cover-art track cards from /taylor-swift', async () => {
+    await t.test('GET /eminem renders distinct cover-art track cards and artist OG image from /taylor-swift', async () => {
         const res = await requestApp(server, '/eminem');
         assert.equal(res.statusCode, 200);
         assert.match(res.body, /<h1 class="artist-shelf-title">Eminem/);
         assert.match(res.body, /data-track="Lose Yourself"/);
         assert.doesNotMatch(res.body, /data-track="Cruel Summer"/);
+        assert.match(res.body, /<meta property="og:image" content="https:\/\/type\.vincentchan\.uk\/og\/artists\/eminem\.png">/);
+        assert.match(res.body, /<meta property="og:image:alt" content="TuneTyper typing challenge for Eminem: type Rap God lyrics and beat your WPM\.">/);
     });
 
     await t.test('GET /sabrinacarpenter (unhyphenated) 301-redirects to canonical /sabrina-carpenter', async () => {
@@ -451,5 +456,16 @@ test('SEO & Open Graph metadata validation', async (t) => {
         const ogImageAlt = getTagAttr(/<meta\s+property=["']og:image:alt[\"'][^>]*>/i, 'content');
         assert.ok(ogImageAlt, 'og:image:alt must exist');
         assert.ok(ogImageAlt.length > 20, 'og:image:alt should be descriptive');
+    });
+
+    await t.test('All 30 featured artists have pre-rendered Open Graph social cards in public/og/artists/', () => {
+        const ogDir = path.join(__dirname, '..', 'public', 'og', 'artists');
+        assert.ok(fs.existsSync(ogDir), 'public/og/artists must exist');
+        for (const artist of FEATURED_ARTISTS) {
+            const cardPath = path.join(ogDir, `${artist.slug}.png`);
+            assert.ok(fs.existsSync(cardPath), `Open Graph card for ${artist.slug} must exist`);
+            const stat = fs.statSync(cardPath);
+            assert.ok(stat.size > 10000, `Open Graph card for ${artist.slug} should not be empty`);
+        }
     });
 });

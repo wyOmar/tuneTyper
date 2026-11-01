@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "vercel dev",
-    "test": "node --test"
+    "test": "node --test",
+    "generate:og": "node scripts/generate-artist-og.js"
   },
   "dependencies": {
     "@vercel/analytics": "^1.4.1",

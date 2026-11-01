@@ -1370,6 +1370,30 @@ function renderArtistHtml(artist, baseIndexHtml) {
         `<meta name="twitter:description" content="${safeSocialDesc}">`
     );
 
+    const leadTrackTitle = Array.isArray(artist.tracks) && artist.tracks[0] && artist.tracks[0].title
+        ? artist.tracks[0].title
+        : 'popular tracks';
+    const safeLeadTrack = escapeHtml(leadTrackTitle);
+    const artistOgImageUrl = `https://type.vincentchan.uk/og/artists/${encodeURIComponent(artist.slug)}.png`;
+    const safeOgAlt = `TuneTyper typing challenge for ${safeArtistName}: type ${safeLeadTrack} lyrics and beat your WPM.`;
+
+    html = html.replace(
+        /<meta\s+property=["']og:image["'][^>]*>/i,
+        `<meta property="og:image" content="${artistOgImageUrl}">`
+    );
+    html = html.replace(
+        /<meta\s+property=["']og:image:alt["'][^>]*>/i,
+        `<meta property="og:image:alt" content="${safeOgAlt}">`
+    );
+    html = html.replace(
+        /<meta\s+name=["']twitter:image["'][^>]*>/i,
+        `<meta name="twitter:image" content="${artistOgImageUrl}">`
+    );
+    html = html.replace(
+        /<meta\s+name=["']twitter:image:alt["'][^>]*>/i,
+        `<meta name="twitter:image:alt" content="${safeOgAlt}">`
+    );
+
     // Demote navbar brand heading to <span> on artist routes so the artist shelf <h1> is the sole semantic <h1>
     html = html.replace(
         /<h1\s+class=["']navbar-title["']>([^<]*)<\/h1>/i,
