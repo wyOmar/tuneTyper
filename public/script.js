@@ -171,6 +171,15 @@ function ensureGameVisibleAboveKeyboard() {
     }
 }
 
+// Helper for internal API requests carrying client validation header
+function apiFetch(url, options = {}) {
+    const customHeaders = { 'X-Requested-With': 'TuneTyper' };
+    const mergedHeaders = options.headers
+        ? Object.assign(customHeaders, options.headers)
+        : customHeaders;
+    return fetch(url, { ...options, headers: mergedHeaders });
+}
+
 // API Fetch Functions
 async function fetchLyrics(artist, track) {
     startLoadingBar();
@@ -178,7 +187,7 @@ async function fetchLyrics(artist, track) {
     const normTrack = String(track || '').trim().toLowerCase();
     let response;
     try {
-        response = await fetch(`/lyrics?artist=${encodeURIComponent(normArtist)}&track=${encodeURIComponent(normTrack)}`);
+        response = await apiFetch(`/lyrics?artist=${encodeURIComponent(normArtist)}&track=${encodeURIComponent(normTrack)}`);
     } finally {
         stopLoadingBar();
     }
@@ -192,7 +201,7 @@ async function fetchArtistId(artistName) {
     // Exists because to fetchTopTracks we need their DeezerID
     // Sometimes the most popular song of the artist we search is a collab song or they are a feature, so we look at the top 5 results to guarantee we get the id of the artist we want
     const normArtist = String(artistName || '').trim().toLowerCase();
-    const response = await fetch(`/tracks?artist=${encodeURIComponent(normArtist)}`);
+    const response = await apiFetch(`/tracks?artist=${encodeURIComponent(normArtist)}`);
     if (!response.ok) throw new Error('Failed to fetch artist data.');
     const data = await response.json();
     if (data.data.length === 0) throw new Error('Artist not found.');
@@ -215,7 +224,7 @@ async function fetchArtistId(artistName) {
 
 async function fetchTopTracks(artistId, limit = 50) {
     const limitParam = limit !== 50 ? `&limit=${encodeURIComponent(limit)}` : '';
-    const response = await fetch(`/top-tracks?artistId=${encodeURIComponent(artistId)}${limitParam}`);
+    const response = await apiFetch(`/top-tracks?artistId=${encodeURIComponent(artistId)}${limitParam}`);
     if (!response.ok) throw new Error('Failed to fetch top tracks.');
     const data = await response.json();
     return data.data;
@@ -253,7 +262,7 @@ async function loadCuratedPlaylist(playlistId = currentPlaylistId) {
     }
 
     try {
-        const response = await fetch(`/default?id=${encodeURIComponent(currentPlaylistId)}`);
+        const response = await apiFetch(`/default?id=${encodeURIComponent(currentPlaylistId)}`);
         if (!response.ok) throw new Error('Failed to fetch playlist data.');
 
         const data = await response.json();
@@ -1052,7 +1061,7 @@ async function fetchTrackDetails(trackId) {
     }
 
     try {
-        const res = await fetch(`/track-details?trackId=${encodeURIComponent(trackId)}`);
+        const res = await apiFetch(`/track-details?trackId=${encodeURIComponent(trackId)}`);
         if (res.ok) {
             const details = await res.json();
             trackDetailsCache.set(cacheKey, { data: details, fetchedAt: Date.now() });
@@ -1421,7 +1430,7 @@ function filterAndShowSuggestions(query) {
         debounceSuggestTimeout = setTimeout(async () => {
             try {
                 const searchStr = `${targetArtistName} ${currentQuery}`;
-                const res = await fetch(`/tracks?artist=${encodeURIComponent(searchStr)}`);
+                const res = await apiFetch(`/tracks?artist=${encodeURIComponent(searchStr)}`);
                 if (requestId !== suggestRequestId) return;
                 if (res.ok) {
                     const data = await res.json();
@@ -2574,7 +2583,7 @@ function triggerOmniboxAutocomplete(rawQuery) {
     // 2. Debounced fetch to Edge-cached /suggest endpoint using normalized cacheKey so CDN hit rates stay high
     debounceOmniboxTimeout = setTimeout(async () => {
         try {
-            const res = await fetch(`/suggest?q=${encodeURIComponent(cacheKey)}`);
+            const res = await apiFetch(`/suggest?q=${encodeURIComponent(cacheKey)}`);
             if (reqId !== omniboxRequestId || !res.ok) return;
             const data = await res.json();
             if (reqId !== omniboxRequestId) return;
@@ -2620,7 +2629,7 @@ async function resolveSearchIntent(rawInput) {
     let suggestData = omniboxSuggestCache.get(qNorm) || null;
     if (!suggestData && qNorm) {
         try {
-            const res = await fetch(`/suggest?q=${encodeURIComponent(qNorm)}`);
+            const res = await apiFetch(`/suggest?q=${encodeURIComponent(qNorm)}`);
             if (res.ok) {
                 suggestData = await res.json();
                 omniboxSuggestCache.set(qNorm, suggestData);
@@ -2856,7 +2865,7 @@ async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = nu
     startLoadingBar();
     try {
         const normalizedSearchQuery = String(searchQuery || '').trim().toLowerCase();
-        const response = await fetch(`/tracks?artist=${encodeURIComponent(normalizedSearchQuery)}`);
+        const response = await apiFetch(`/tracks?artist=${encodeURIComponent(normalizedSearchQuery)}`);
         if (!response.ok) throw new Error('Failed to find track on Deezer.');
         const data = await response.json();
         if (!data.data || data.data.length === 0) {
@@ -3150,7 +3159,7 @@ async function handleSongSearch(songName, preferredArtist = '', preferredTitle =
 
     try {
         const normalizedQuery = songName.trim().toLowerCase();
-        const response = await fetch(`/tracks?artist=${encodeURIComponent(normalizedQuery)}`);
+        const response = await apiFetch(`/tracks?artist=${encodeURIComponent(normalizedQuery)}`);
         const data = await response.json();
 
         if (!data.data || data.data.length === 0) throw new Error('No matching tracks found for the song.');
