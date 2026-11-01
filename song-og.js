@@ -175,32 +175,103 @@ function prepareLyricsSnippet(rawLyrics, options = {}) {
 
     if (rawLines.length === 0) return null;
 
-    // Take up to 4 readable lines
-    const lines = rawLines.slice(0, 4).map(l => truncateAtWord(l, 42));
+    // Join into flowing continuous text so lyrics naturally fill the display box without artificial line chopping
+    const continuousText = rawLines.join(' ').replace(/\s+/g, ' ').trim();
+    if (!continuousText) return null;
+
+    // Wrap into up to 3 readable lines of ~40 chars to fill the 814px display box at 30px mono font
+    const maxCharsPerLine = options.maxCharsPerLine || 40;
+    const maxLines = options.maxLines || 3;
+    const words = continuousText.split(/\s+/);
+    const lines = [];
+    let currentLine = '';
+
+    for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        if (!currentLine) {
+            currentLine = word;
+        } else if ((currentLine + ' ' + word).length <= maxCharsPerLine) {
+            currentLine += ' ' + word;
+        } else {
+            lines.push(currentLine);
+            currentLine = word;
+            if (lines.length === maxLines - 1) {
+                const restWords = words.slice(i + 1);
+                if (restWords.length > 0) {
+                    const candidate = currentLine + ' ' + restWords.join(' ');
+                    if (candidate.length <= maxCharsPerLine) {
+                        currentLine = candidate;
+                    } else {
+                        let cut = candidate.slice(0, maxCharsPerLine - 3);
+                        const lastSpace = cut.lastIndexOf(' ');
+                        if (lastSpace > 0) cut = cut.slice(0, lastSpace);
+                        currentLine = cut.trimEnd() + '...';
+                    }
+                }
+                break;
+            }
+        }
+    }
+    if (currentLine) lines.push(currentLine);
     if (lines.length === 0) return null;
 
-    // In the first line, highlight the first word or two as "done" (green)
-    // and underline the current character/caret to match TuneTyper in-game typing aesthetic
+    // In line 1, construct an active typing state matching the artist card and in-game typing:
+    // done: completed word(s) in green
+    // ok: typed character(s) of active word in green with underline
+    // caret: active character currently being typed in white with underline and cursor bar
+    // todoWord: untyped character(s) of active word with underline
+    // todo: remaining text on line 1 in muted grey
     const firstLineWords = lines[0].split(' ');
     let done = '';
-    let current = '';
+    let ok = '';
+    let caret = '';
+    let todoWord = '';
     let todo = '';
 
     if (firstLineWords.length >= 2) {
         done = firstLineWords[0] + ' ';
-        current = firstLineWords[1];
+        const activeWord = firstLineWords[1];
+        if (activeWord.length === 1) {
+            ok = '';
+            caret = activeWord;
+            todoWord = '';
+        } else if (activeWord.length === 2) {
+            ok = activeWord[0];
+            caret = activeWord[1];
+            todoWord = '';
+        } else {
+            const splitIdx = Math.max(1, Math.floor(activeWord.length / 2));
+            ok = activeWord.slice(0, splitIdx - 1);
+            caret = activeWord[splitIdx - 1];
+            todoWord = activeWord.slice(splitIdx);
+        }
         todo = firstLineWords.slice(2).join(' ');
         if (todo) todo = ' ' + todo;
     } else if (firstLineWords.length === 1) {
-        const word = firstLineWords[0];
-        const half = Math.max(1, Math.floor(word.length / 2));
-        done = word.slice(0, half);
-        current = word.slice(half);
+        const activeWord = firstLineWords[0];
+        if (activeWord.length === 1) {
+            done = '';
+            ok = '';
+            caret = activeWord;
+            todoWord = '';
+        } else if (activeWord.length === 2) {
+            done = '';
+            ok = activeWord[0];
+            caret = activeWord[1];
+            todoWord = '';
+        } else {
+            const splitIdx = Math.max(1, Math.floor(activeWord.length / 2));
+            ok = activeWord.slice(0, splitIdx - 1);
+            caret = activeWord[splitIdx - 1];
+            todoWord = activeWord.slice(splitIdx);
+        }
         todo = '';
     }
 
+    const current = ok + caret + todoWord;
+
     return {
-        line1: { done, current, todo },
+        line1: { done, ok, caret, todoWord, current, todo },
         remainingLines: lines.slice(1)
     };
 }
@@ -299,19 +370,42 @@ function buildSongOgSvg({ track, artist, album, coverDataUri, logoDataUri, lyric
     // Build the typing display box lines
     let typingLinesSvg = '';
     if (lyricsSnippet && lyricsSnippet.line1) {
-        const { done, current, todo } = lyricsSnippet.line1;
-        typingLinesSvg += `<text x="366" y="255" font-size="26" font-family="DejaVu Sans Mono, monospace" xml:space="preserve"><tspan fill="#4caf50">${escapeXml(done)}</tspan><tspan fill="#4caf50" text-decoration="underline">${escapeXml(current)}</tspan><tspan fill="#7e7e7e">${escapeXml(todo)}</tspan></text>`;
+        const { done, ok, caret, todoWord, current, todo } = lyricsSnippet.line1;
+        const remainingLines = lyricsSnippet.remainingLines || [];
+        const lineCount = 1 + remainingLines.length;
 
-        const startY = 312;
-        const lineSpacing = 54;
-        lyricsSnippet.remainingLines.forEach((line, index) => {
-            const y = startY + index * lineSpacing;
-            typingLinesSvg += `\n        <text x="366" y="${y}" font-size="26" font-family="DejaVu Sans Mono, monospace" xml:space="preserve"><tspan fill="#7e7e7e">${escapeXml(line)}</tspan></text>`;
+        const fontSize = 30;
+        const lineSpacing = lineCount >= 4 ? 48 : 54;
+        const boxCenterY = 180 + 320 / 2; // 340 (box y: 180, height: 320)
+        const totalHeight = (lineCount - 1) * lineSpacing;
+        const startY = Math.round(boxCenterY - totalHeight / 2 + (fontSize * 0.35));
+        const startX = 366;
+
+        const safeDone = escapeXml(done);
+        const safeOk = escapeXml(ok || '');
+        const safeCaret = escapeXml(caret || current || '');
+        const safeTodoWord = escapeXml(todoWord || '');
+        const safeTodo = escapeXml(todo);
+
+        // Calculate cursor bar coordinates right before caret character
+        // In DejaVu Sans Mono, character advance width = fontSize * 1233 / 2048 (~18.06px at 30px)
+        const charWidth = fontSize * 1233 / 2048;
+        const charsBeforeCaret = (done + (ok || '')).length;
+        const cursorX = (startX + charsBeforeCaret * charWidth).toFixed(1);
+        const cursorY = (startY - fontSize * 0.82).toFixed(1);
+        const cursorH = (fontSize * 1.02).toFixed(1);
+
+        typingLinesSvg += `<rect x="${cursorX}" y="${cursorY}" width="3" height="${cursorH}" fill="#ffffff" rx="1"/>
+        <text x="${startX}" y="${startY}" font-size="${fontSize}" font-family="DejaVu Sans Mono, monospace" xml:space="preserve"><tspan fill="#4caf50">${safeDone}</tspan><tspan fill="#4caf50" text-decoration="underline">${safeOk}</tspan><tspan fill="#ffffff" text-decoration="underline">${safeCaret}</tspan><tspan fill="#7e7e7e" text-decoration="underline">${safeTodoWord}</tspan><tspan fill="#7e7e7e">${safeTodo}</tspan></text>`;
+
+        remainingLines.forEach((line, index) => {
+            const y = startY + (index + 1) * lineSpacing;
+            typingLinesSvg += `\n        <text x="${startX}" y="${y}" font-size="${fontSize}" font-family="DejaVu Sans Mono, monospace" xml:space="preserve"><tspan fill="#7e7e7e">${escapeXml(line)}</tspan></text>`;
         });
     } else {
         // Fallback display when lyrics are instrumental or unavailable
         typingLinesSvg = `<text x="366" y="270" font-size="30" font-family="DejaVu Sans Mono, monospace"><tspan fill="#4caf50">&#x266A; </tspan><tspan fill="#ffffff" font-weight="bold">Type the lyrics to this track</tspan></text>
-        <text x="366" y="325" font-size="26" font-family="DejaVu Sans Mono, monospace"><tspan fill="#7e7e7e">Test your speed &amp; guess the song</tspan></text>
+        <text x="366" y="325" font-size="26" font-family="DejaVu Sans Mono, monospace"><tspan fill="#7e7e7e">Test and train your typing speed</tspan></text>
         <text x="366" y="380" font-size="26" font-family="DejaVu Sans Mono, monospace"><tspan fill="#7e7e7e">Play free in your browser at</tspan></text>
         <text x="366" y="435" font-size="26" font-family="DejaVu Sans Mono, monospace"><tspan fill="#4caf50">type.vincentchan.uk</tspan></text>`;
     }
@@ -347,7 +441,7 @@ function buildSongOgSvg({ track, artist, album, coverDataUri, logoDataUri, lyric
 
   <!-- Tagline: dynamically scaled so full track + artist are never truncated -->
   <text x="56" y="148" fill="#c0c0c0" font-size="${taglineFontSize}" font-family="DejaVu Sans, Arial, sans-serif">
-    Type the lyrics to <tspan fill="#4caf50" font-weight="bold">${safeTrack}</tspan> by <tspan fill="#ffffff" font-weight="bold">${safeArtist}</tspan>. Guess the tune &amp; beat your WPM.
+    Type the lyrics to <tspan fill="#4caf50" font-weight="bold">${safeTrack}</tspan> by <tspan fill="#ffffff" font-weight="bold">${safeArtist}</tspan>. Test and train your typing speed.
   </text>
 
   <!-- Left: Track Card with multi-line title wrapping -->
@@ -463,9 +557,9 @@ function renderSongHtml(trackDetails, challenge, baseIndexHtml) {
     const pageTitle = `${trackTitle} — ${artistName} | TuneTyper Challenge`;
     let description = '';
     if (challenge && challenge.wpm) {
-        description = `Can you beat ${challenge.wpm} WPM? Type the lyrics to "${trackTitle}" by ${artistName} and guess the tune on TuneTyper!`;
+        description = `Can you beat ${challenge.wpm} WPM? Type the lyrics to "${trackTitle}" by ${artistName} and test your typing speed on TuneTyper!`;
     } else {
-        description = `Type the lyrics to "${trackTitle}" by ${artistName}, guess the tune, and test your typing speed on TuneTyper!`;
+        description = `Type the lyrics to "${trackTitle}" by ${artistName}. Test and train your typing speed on TuneTyper!`;
     }
 
     const ogImageUrl = trackId
