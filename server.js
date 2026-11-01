@@ -89,7 +89,7 @@ async function queryOvhSingle(artist, trackTitle) {
 
 /**
  * Read-through lyrics resolver:
- * - Permanent Redis cache on hit (lyrics are immutable & contain no expiring tokens)
+ * - 7-day rolling Redis cache on hit (automatically refreshed upon re-play or re-warm)
  * - 24h negative cache on genuine 404 / empty lyrics so missing songs don't hammer lyrics.ovh
  * - Automatic stripped-title retry when Deezer titles include "(feat. ...)" / "- Radio Edit"
  */
@@ -137,9 +137,9 @@ async function fetchAndCacheLyrics(artist, track, cache = defaultCache) {
 
         if (lookup.found) {
             const payload = { lyrics: lookup.lyrics };
-            await cache.set(primaryKey, payload, null); // Permanent 24/7 in Redis
+            await cache.set(primaryKey, payload, TTL.LYRICS_SECONDS); // 7-day rolling cache in Redis
             if (usedFallbackKey && usedFallbackKey !== primaryKey) {
-                await cache.set(usedFallbackKey, payload, null);
+                await cache.set(usedFallbackKey, payload, TTL.LYRICS_SECONDS);
             }
             return { status: 'fresh', lyrics: lookup.lyrics, cached: false };
         }
@@ -208,7 +208,7 @@ async function warmSinglePlaylist(playlistId, options = {}) {
             totalTracks: sanitizedTracks.length,
             playableCount: verified.length,
             tracks: verified
-        }, null);
+        }, TTL.PLAYLIST_PLAYABLE_SECONDS);
     }
 
     return {
@@ -649,7 +649,7 @@ app.get('/track-details', async (req, res) => {
     }
 });
 
-// OVH Lyrics API Route (cached permanently in Redis & 30d at Vercel CDN Edge)
+// OVH Lyrics API Route (cached 7-day rolling in Redis & 30d at Vercel CDN Edge)
 app.get('/lyrics', async (req, res) => {
     const artist = typeof req.query.artist === 'string' ? req.query.artist.trim() : '';
     const track = typeof req.query.track === 'string' ? req.query.track.trim() : '';

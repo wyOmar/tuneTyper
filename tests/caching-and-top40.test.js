@@ -11,7 +11,8 @@ const {
     resolveRedisConfig,
     stripTrackDecorations,
     sanitizeTrackForCache,
-    lyricsCacheKey
+    lyricsCacheKey,
+    TTL
 } = require('../cache');
 
 const app = require('../server');
@@ -109,15 +110,27 @@ test('Upstash Redis REST client, env auto-detection, MGET batching & request coa
             })
         });
 
-        // Permanent SET (no EX flag) for verified lyrics
-        await client.set('tt:v1:lyrics:queen::bohemian rhapsody', { lyrics: 'Is this the real life?' }, null);
-        assert.deepEqual(mockUpstash.commands[0].slice(0, 2), ['SET', 'tt:v1:lyrics:queen::bohemian rhapsody']);
-        assert.equal(mockUpstash.commands[0].length, 3, 'Permanent lyrics SET must omit EX expiration');
+        // Unspecified/null TTL SET (no EX flag)
+        await client.set('tt:v1:legacy:sample', { test: true }, null);
+        assert.deepEqual(mockUpstash.commands[0].slice(0, 2), ['SET', 'tt:v1:legacy:sample']);
+        assert.equal(mockUpstash.commands[0].length, 3, 'Explicit null TTL SET must omit EX expiration');
+
+        // Rolling lyrics SET (7 days EX flag)
+        assert.equal(TTL.LYRICS_SECONDS, 7 * 24 * 60 * 60);
+        await client.set('tt:v1:lyrics:queen::bohemian rhapsody', { lyrics: 'Is this the real life?' }, TTL.LYRICS_SECONDS);
+        assert.equal(mockUpstash.commands[1][3], 'EX');
+        assert.equal(mockUpstash.commands[1][4], 7 * 24 * 60 * 60);
+
+        // Rolling playlist playable manifest SET (48 hours EX flag)
+        assert.equal(TTL.PLAYLIST_PLAYABLE_SECONDS, 48 * 60 * 60);
+        await client.set('tt:v1:playlist:13650203641:playable', { tracks: [] }, TTL.PLAYLIST_PLAYABLE_SECONDS);
+        assert.equal(mockUpstash.commands[2][3], 'EX');
+        assert.equal(mockUpstash.commands[2][4], 48 * 60 * 60);
 
         // Expiring SET (with EX)
         await client.set('tt:v1:suggest:queen', { artists: ['Queen'] }, 86400);
-        assert.equal(mockUpstash.commands[1][3], 'EX');
-        assert.equal(mockUpstash.commands[1][4], 86400);
+        assert.equal(mockUpstash.commands[3][3], 'EX');
+        assert.equal(mockUpstash.commands[3][4], 86400);
 
         // L1 hit should NOT issue a network GET to Upstash
         const cmdCountBeforeL1 = mockUpstash.commands.length;
