@@ -306,6 +306,11 @@ function createCacheClient(options = {}) {
 
         if (skipRedis || !isRedisConfigured()) return true;
 
+        // Defensive guard: never serialize raw Buffers into Redis as huge JSON byte arrays
+        if (Buffer.isBuffer(value)) {
+            return true;
+        }
+
         try {
             const serialized = JSON.stringify(value);
             const cmd = (typeof ttlSeconds === 'number' && ttlSeconds > 0)

@@ -138,6 +138,15 @@ test('Upstash Redis REST client, env auto-detection, MGET batching & request coa
         assert.equal(l1Hit.lyrics, 'Is this the real life?');
         assert.equal(mockUpstash.commands.length, cmdCountBeforeL1, 'L1 hit must consume 0 Redis commands');
 
+        // Raw Buffer guard: must stay in L1 and not send large stringified JSON bytes to Redis
+        const cmdCountBeforeBuffer = mockUpstash.commands.length;
+        const testBuffer = Buffer.from('test-binary-data');
+        await client.set('tt:v1:test-buffer', testBuffer, 3600);
+        assert.equal(mockUpstash.commands.length, cmdCountBeforeBuffer, 'Raw Buffer set must not issue Redis commands');
+        const bufferFromL1 = await client.get('tt:v1:test-buffer', { skipRedis: true });
+        assert.ok(Buffer.isBuffer(bufferFromL1));
+        assert.equal(bufferFromL1.toString(), 'test-binary-data');
+
         // Simulate serverless cold start by clearing L1 memory -> should read from L2 Upstash
         client.clearMemory();
         const l2Hit = await client.get('tt:v1:lyrics:queen::bohemian rhapsody');

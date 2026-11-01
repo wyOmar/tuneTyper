@@ -817,8 +817,8 @@ app.get(['/api/og/track', '/og/track/:id.png'], async (req, res) => {
     const cacheKey = ogSongImageCacheKey(trackId);
 
     try {
-        // Return cached PNG if already rendered
-        const cachedPng = await defaultCache.get(cacheKey);
+        // Return cached PNG if already rendered in L1 memory
+        const cachedPng = await defaultCache.get(cacheKey, { skipRedis: true });
         if (cachedPng && Buffer.isBuffer(cachedPng)) {
             res.setHeader('Content-Type', 'image/png');
             res.setHeader('Cache-Control', 'public, max-age=31536000, s-maxage=31536000, immutable');
@@ -849,8 +849,9 @@ app.get(['/api/og/track', '/og/track/:id.png'], async (req, res) => {
             lyrics
         });
 
-        // Store rendered PNG buffer in cache
-        await defaultCache.set(cacheKey, pngBuffer, TTL.OG_IMAGE_SECONDS);
+        // Store rendered PNG buffer in L1 RAM cache only (skip Redis to prevent bandwidth/storage bloat;
+        // Vercel Edge CDN caches the response globally with immutable headers for 1 year)
+        await defaultCache.set(cacheKey, pngBuffer, TTL.OG_IMAGE_SECONDS, { skipRedis: true });
 
         res.setHeader('Content-Type', 'image/png');
         res.setHeader('Cache-Control', 'public, max-age=31536000, s-maxage=31536000, immutable');

@@ -265,11 +265,12 @@ test.describe('Dynamic Song OpenGraph Generator & SSR Metadata', () => {
             assert.ok(html.includes('content="https://type.vincentchan.uk/og-image.png"'));
         });
 
-        test('GET /api/og/track?id=1409072752 returns 200 image/png with immutable Edge caching', async () => {
+        test('GET /api/og/track?id=1409072752 returns 200 image/png with immutable Edge caching and L1 HIT on repeat', async () => {
             const res = await fetch(`${baseUrl}/api/og/track?id=1409072752`);
             assert.equal(res.status, 200);
             assert.equal(res.headers.get('content-type'), 'image/png');
             assert.equal(res.headers.get('cache-control'), 'public, max-age=31536000, s-maxage=31536000, immutable');
+            assert.equal(res.headers.get('x-cache'), 'MISS');
 
             const buffer = Buffer.from(await res.arrayBuffer());
             assert.ok(buffer.length > 20000);
@@ -278,6 +279,12 @@ test.describe('Dynamic Song OpenGraph Generator & SSR Metadata', () => {
             assert.equal(buffer[1], 0x50);
             assert.equal(buffer[2], 0x4e);
             assert.equal(buffer[3], 0x47);
+
+            // Repeat request should hit L1 memory cache directly without regenerating or hitting Redis
+            const resHit = await fetch(`${baseUrl}/api/og/track?id=1409072752`);
+            assert.equal(resHit.status, 200);
+            assert.equal(resHit.headers.get('content-type'), 'image/png');
+            assert.equal(resHit.headers.get('x-cache'), 'HIT');
         });
 
         test('GET /og/track/:id.png alias route also serves identical image/png', async () => {
