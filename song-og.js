@@ -330,6 +330,22 @@ async function fetchImageDataUri(url) {
     }
 }
 
+// Cache bundled font file paths for isolated serverless environments (e.g. AWS Lambda / Vercel)
+let cachedFontFiles = null;
+function getFontFiles() {
+    if (!cachedFontFiles) {
+        const fontDir = path.join(__dirname, 'assets', 'fonts');
+        const candidates = [
+            path.join(fontDir, 'DejaVuSans.ttf'),
+            path.join(fontDir, 'DejaVuSans-Bold.ttf'),
+            path.join(fontDir, 'DejaVuSansMono.ttf'),
+            path.join(fontDir, 'DejaVuSansMono-Bold.ttf')
+        ];
+        cachedFontFiles = candidates.filter(f => fs.existsSync(f));
+    }
+    return cachedFontFiles;
+}
+
 /**
  * Generate a PNG Buffer for a song OpenGraph card
  */
@@ -347,8 +363,15 @@ async function generateSongOgImage({ track, artist, album, coverUrl, lyrics }) {
         lyricsSnippet
     });
 
+    const fontFiles = getFontFiles();
     const resvg = new Resvg(svg, {
-        font: { loadSystemFonts: true },
+        font: {
+            fontFiles: fontFiles.length > 0 ? fontFiles : undefined,
+            loadSystemFonts: true,
+            defaultFontFamily: 'DejaVu Sans',
+            monospaceFamily: 'DejaVu Sans Mono',
+            sansSerifFamily: 'DejaVu Sans'
+        },
         fitTo: { mode: 'width', value: 1200 }
     });
 
@@ -403,6 +426,7 @@ function renderSongHtml(trackDetails, challenge, baseIndexHtml) {
 module.exports = {
     escapeXml,
     truncate,
+    getFontFiles,
     decodeChallengeToken,
     prepareLyricsSnippet,
     buildSongOgSvg,
