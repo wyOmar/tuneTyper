@@ -364,7 +364,7 @@ test('Unified ARTIST / SONG omnibox ranking & game-mode decoupling', async (t) =
         assert.equal(naturalSongIntent.title, 'Espresso');
     });
 
-    await t.test('generateShareText respects currentGameMode without needing legacy dropdown', () => {
+    await t.test('generateShareText produces clean challenge card for completed runs', () => {
         scriptModule._setState({
             selectedTrack: { title: 'Espresso', artist: { name: 'Sabrina Carpenter' } },
             finalWPM: 92,
@@ -373,16 +373,14 @@ test('Unified ARTIST / SONG omnibox ranking & game-mode decoupling', async (t) =
             gaveUp: false,
             attemptHistory: ['correct'],
             guessCount: 1,
+            completedTyping: true,
             currentGameMode: 'song'
         });
         const songShare = scriptModule.generateShareText();
-        assert.match(songShare, /Direct Song Practice/);
-        assert.match(songShare, /Beat my score:/);
-
-        scriptModule._setState({ currentGameMode: 'artist' });
-        const artistShare = scriptModule.generateShareText();
-        assert.match(artistShare, /Guessed in 1 try!/);
-        assert.match(artistShare, /Can you beat me\?/);
+        assert.match(songShare, /TuneTyper/);
+        assert.match(songShare, /"Espresso" — Sabrina Carpenter/);
+        assert.match(songShare, /92 WPM/);
+        assert.match(songShare, /Can you beat me\?/);
     });
 });
 
