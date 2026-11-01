@@ -31,10 +31,16 @@ const {
     tracksSearchCacheKey,
     topTracksCacheKey,
     trackDetailsCacheKey,
+    ogSongImageCacheKey,
     sanitizeTrackForCache,
     isUnwantedTrack,
     defaultCache
 } = require('./cache');
+const {
+    decodeChallengeToken,
+    generateSongOgImage,
+    renderSongHtml
+} = require('./song-og');
 
 const UK_TOP_40_PLAYLIST_ID = '2868476282';
 
@@ -305,6 +311,7 @@ app.get('/favicon.ico', (req, res) => {
 });
 
 app.use(express.static(publicDir, {
+    index: false,
     maxAge: '1d',
     setHeaders: (res, filePath) => {
         if (filePath.endsWith('.html')) {
@@ -316,8 +323,57 @@ app.use(express.static(publicDir, {
     }
 }));
 
-// Serve the frontend
-app.get('/', (req, res) => {
+// Serve the frontend (with dynamic SSR OpenGraph tags for shared songs & challenges)
+app.get('/', async (req, res) => {
+    const hasChallenge = typeof req.query.c === 'string' && req.query.c.trim();
+    const directTrackId = typeof req.query.id === 'string' ? req.query.id.trim() : (typeof req.query.trackId === 'string' ? req.query.trackId.trim() : '');
+    const directArtist = typeof req.query.artist === 'string' ? req.query.artist.trim() : '';
+    const directTrack = typeof req.query.track === 'string' ? req.query.track.trim() : '';
+
+    if (hasChallenge || directTrackId || (directArtist && directTrack)) {
+        try {
+            let challenge = null;
+            if (hasChallenge) {
+                challenge = decodeChallengeToken(req.query.c.trim());
+            }
+
+            const trackId = (challenge && challenge.trackId) || (directTrackId && /^\d+$/.test(directTrackId) ? Number(directTrackId) : null);
+            let trackDetails = null;
+
+            if (trackId) {
+                try {
+                    const { payload } = await fetchTrackDetails(trackId);
+                    trackDetails = payload;
+                } catch (_) {
+                    // Non-fatal if Deezer fails or track is not found
+                }
+            }
+
+            if (!trackDetails && (challenge && (challenge.artist || challenge.track))) {
+                trackDetails = {
+                    id: null,
+                    title: challenge.track || 'Track',
+                    artist: { name: challenge.artist || 'Artist' }
+                };
+            } else if (!trackDetails && directArtist && directTrack) {
+                trackDetails = {
+                    id: directTrackId || null,
+                    title: directTrack,
+                    artist: { name: directArtist }
+                };
+            }
+
+            if (trackDetails) {
+                res.setHeader('Content-Type', 'text/html; charset=utf-8');
+                res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
+                res.setHeader('Vary', 'Accept-Encoding');
+                return res.send(renderSongHtml(trackDetails, challenge || {}, baseIndexHtml));
+            }
+        } catch (err) {
+            console.error('Error rendering dynamic song metadata:', err.message);
+        }
+    }
+
     res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
     res.setHeader('Vary', 'Accept-Encoding');
     res.sendFile(indexHtmlPath);
@@ -683,54 +739,60 @@ app.get('/playlist/:id', requireGameClient, async (req, res) => {
     }
 });
 
+async function fetchTrackDetails(trackId) {
+    const key = trackDetailsCacheKey(trackId);
+    let payload = await defaultCache.get(key, { skipRedis: true });
+    let cacheHit = Boolean(payload);
+
+    if (!payload) {
+        payload = await defaultCache.coalesce(key, async () => {
+            const response = await axios.get(
+                `https://api.deezer.com/track/${encodeURIComponent(trackId)}`,
+                { timeout: 8000 }
+            );
+            if (response.data.error || !response.data.id) {
+                const err = new Error(response.data.error ? response.data.error.message : 'Track not found');
+                err.statusCode = 404;
+                throw err;
+            }
+            const data = {
+                id: response.data.id,
+                title: response.data.title,
+                title_short: response.data.title_short || response.data.title,
+                release_date: response.data.release_date,
+                bpm: response.data.bpm,
+                duration: response.data.duration,
+                preview: response.data.preview || '',
+                artist: response.data.artist ? {
+                    id: response.data.artist.id,
+                    name: response.data.artist.name,
+                    picture_small: response.data.artist.picture_small,
+                    picture_medium: response.data.artist.picture_medium
+                } : null,
+                album: response.data.album ? {
+                    id: response.data.album.id,
+                    title: response.data.album.title,
+                    cover_small: response.data.album.cover_small,
+                    cover_medium: response.data.album.cover_medium,
+                    cover_big: response.data.album.cover_big,
+                    cover_xl: response.data.album.cover_xl
+                } : null
+            };
+            await defaultCache.set(key, data, TTL.TRACK_DETAILS_SECONDS, { skipRedis: true });
+            return data;
+        });
+    }
+
+    return { payload, cacheHit };
+}
+
 // Deezer API: Get track details + fresh signed 30s audio preview URL (10m Edge + L1 cache)
 app.get('/track-details', requireGameClient, async (req, res) => {
     const trackId = typeof req.query.trackId === 'string' ? req.query.trackId.trim() : '';
     if (!trackId) return res.status(400).send('Track ID is required.');
 
-    const key = trackDetailsCacheKey(trackId);
-
     try {
-        let cacheHit = true;
-        let payload = await defaultCache.get(key, { skipRedis: true });
-
-        if (!payload) {
-            cacheHit = false;
-            payload = await defaultCache.coalesce(key, async () => {
-                const response = await axios.get(
-                    `https://api.deezer.com/track/${encodeURIComponent(trackId)}`,
-                    { timeout: 8000 }
-                );
-                if (response.data.error || !response.data.id) {
-                    const err = new Error(response.data.error ? response.data.error.message : 'Track not found');
-                    err.statusCode = 404;
-                    throw err;
-                }
-                const data = {
-                    id: response.data.id,
-                    title: response.data.title,
-                    title_short: response.data.title_short || response.data.title,
-                    release_date: response.data.release_date,
-                    bpm: response.data.bpm,
-                    duration: response.data.duration,
-                    preview: response.data.preview || '',
-                    artist: response.data.artist ? {
-                        id: response.data.artist.id,
-                        name: response.data.artist.name,
-                        picture_small: response.data.artist.picture_small,
-                        picture_medium: response.data.artist.picture_medium
-                    } : null,
-                    album: response.data.album ? {
-                        id: response.data.album.id,
-                        title: response.data.album.title,
-                        cover_small: response.data.album.cover_small,
-                        cover_medium: response.data.album.cover_medium
-                    } : null
-                };
-                await defaultCache.set(key, data, TTL.TRACK_DETAILS_SECONDS, { skipRedis: true });
-                return data;
-            });
-        }
+        const { payload, cacheHit } = await fetchTrackDetails(trackId);
 
         // 10m Edge TTL keeps Deezer signed hdnea= preview URLs fresh while deduplicating bursts
         res.setHeader('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=300');
@@ -741,6 +803,64 @@ app.get('/track-details', requireGameClient, async (req, res) => {
         res.setHeader('Cache-Control', 'no-store');
         const status = error.statusCode || 500;
         res.status(status).json({ error: error.message || 'Failed to fetch track details.' });
+    }
+});
+
+// Dynamic OpenGraph Social Preview Card for Individual Songs (Edge-cached & immutable)
+app.get(['/api/og/track', '/og/track/:id.png'], async (req, res) => {
+    const rawId = req.query.id || req.query.trackId || req.params.id;
+    const trackId = typeof rawId === 'string' ? rawId.trim() : '';
+    if (!trackId || !/^\d+$/.test(trackId)) {
+        return res.status(400).send('Valid numeric track ID is required.');
+    }
+
+    const cacheKey = ogSongImageCacheKey(trackId);
+
+    try {
+        // Return cached PNG if already rendered
+        const cachedPng = await defaultCache.get(cacheKey);
+        if (cachedPng && Buffer.isBuffer(cachedPng)) {
+            res.setHeader('Content-Type', 'image/png');
+            res.setHeader('Cache-Control', 'public, max-age=31536000, s-maxage=31536000, immutable');
+            res.setHeader('X-Cache', 'HIT');
+            return res.send(cachedPng);
+        }
+
+        const { payload: track } = await fetchTrackDetails(trackId);
+        const trackTitle = track.title || 'TuneTyper Track';
+        const artistName = track.artist ? track.artist.name : 'Unknown Artist';
+        const albumTitle = track.album ? track.album.title : '';
+        const coverUrl = track.album ? (track.album.cover_big || track.album.cover_medium) : '';
+
+        // Fetch lyrics if available
+        let lyrics = null;
+        try {
+            const lyricsResult = await fetchAndCacheLyrics(artistName, trackTitle, defaultCache);
+            if (lyricsResult && lyricsResult.lyrics) {
+                lyrics = lyricsResult.lyrics;
+            }
+        } catch (_) {}
+
+        const { pngBuffer } = await generateSongOgImage({
+            track: trackTitle,
+            artist: artistName,
+            album: albumTitle,
+            coverUrl,
+            lyrics
+        });
+
+        // Store rendered PNG buffer in cache
+        await defaultCache.set(cacheKey, pngBuffer, TTL.OG_IMAGE_SECONDS);
+
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Cache-Control', 'public, max-age=31536000, s-maxage=31536000, immutable');
+        res.setHeader('X-Cache', 'MISS');
+        res.send(pngBuffer);
+    } catch (error) {
+        console.error(`Error generating OG image for track ${trackId}:`, error.message);
+        res.setHeader('Cache-Control', 'no-store');
+        const status = error.statusCode || 500;
+        res.status(status).send('Failed to generate preview image.');
     }
 });
 
