@@ -327,10 +327,14 @@ test('Express Edge headers, read-through lyrics/Deezer caching & 24/7 UK Top 40 
                 return {
                     data: {
                         id: 101,
+                        title: 'Espresso',
+                        title_short: 'Espresso',
                         release_date: '2024-04-11',
                         bpm: 104,
                         duration: 175,
-                        preview: 'https://cdnt-preview.dzcdn.net/fresh.mp3?hdnea=exp=9999999999'
+                        preview: 'https://cdnt-preview.dzcdn.net/fresh.mp3?hdnea=exp=9999999999',
+                        artist: { id: 99, name: 'Sabrina Carpenter' },
+                        album: { id: 50, title: "Short n' Sweet", cover_medium: 'cover.jpg' }
                     }
                 };
             }
@@ -350,8 +354,12 @@ test('Express Edge headers, read-through lyrics/Deezer caching & 24/7 UK Top 40 
         const details = await requestApp(server, '/track-details?trackId=101');
         assert.equal(details.statusCode, 200);
         assert.match(details.headers['cache-control'], /s-maxage=600/);
+        const detailsBody = JSON.parse(details.body);
+        assert.equal(detailsBody.title, 'Espresso');
+        assert.equal(detailsBody.artist.name, 'Sabrina Carpenter');
+        assert.equal(detailsBody.album.title, "Short n' Sweet");
         assert.equal(
-            JSON.parse(details.body).preview,
+            detailsBody.preview,
             'https://cdnt-preview.dzcdn.net/fresh.mp3?hdnea=exp=9999999999',
             '/track-details must supply fresh signed preview URL'
         );

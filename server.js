@@ -701,12 +701,31 @@ app.get('/track-details', requireGameClient, async (req, res) => {
                     `https://api.deezer.com/track/${encodeURIComponent(trackId)}`,
                     { timeout: 8000 }
                 );
+                if (response.data.error || !response.data.id) {
+                    const err = new Error(response.data.error ? response.data.error.message : 'Track not found');
+                    err.statusCode = 404;
+                    throw err;
+                }
                 const data = {
                     id: response.data.id,
+                    title: response.data.title,
+                    title_short: response.data.title_short || response.data.title,
                     release_date: response.data.release_date,
                     bpm: response.data.bpm,
                     duration: response.data.duration,
-                    preview: response.data.preview || ''
+                    preview: response.data.preview || '',
+                    artist: response.data.artist ? {
+                        id: response.data.artist.id,
+                        name: response.data.artist.name,
+                        picture_small: response.data.artist.picture_small,
+                        picture_medium: response.data.artist.picture_medium
+                    } : null,
+                    album: response.data.album ? {
+                        id: response.data.album.id,
+                        title: response.data.album.title,
+                        cover_small: response.data.album.cover_small,
+                        cover_medium: response.data.album.cover_medium
+                    } : null
                 };
                 await defaultCache.set(key, data, TTL.TRACK_DETAILS_SECONDS, { skipRedis: true });
                 return data;
@@ -720,7 +739,8 @@ app.get('/track-details', requireGameClient, async (req, res) => {
     } catch (error) {
         console.error('Error fetching track details:', error.message);
         res.setHeader('Cache-Control', 'no-store');
-        res.status(500).send('Failed to fetch track details.');
+        const status = error.statusCode || 500;
+        res.status(status).json({ error: error.message || 'Failed to fetch track details.' });
     }
 });
 

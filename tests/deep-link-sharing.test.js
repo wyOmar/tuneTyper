@@ -11,6 +11,9 @@ const {
     decodeChallengeToken,
     extractRandomSection,
     generateShareText,
+    loadSharedChallenge,
+    loadSharedChallengeByTrackId,
+    parseAndLoadUrlParameters,
     resetGame,
     endGame,
     _getState,
@@ -477,5 +480,216 @@ test.describe('Handling early endGame (guess-only share without WPM)', () => {
 
         assert.match(songInfoEl.innerHTML, /<button id="share-score-btn"[^>]*>Share<\/button>/);
         assert.match(songInfoEl.innerHTML, /<button id="share-challenge-btn"[^>]*title="https:\/\/type\.vincentchan\.uk\/\?c=[^"]*"[^>]*>https:\/\/type\.vincentchan\.uk\/\?c=[^<]+<\/button>/);
+    });
+});
+
+test.describe('Ultra-compact Deezer Track ID challenge links (v3 format)', () => {
+    test('encodeChallengeToken compresses challenge into 16-character URL-safe token using Deezer trackId', () => {
+        const payload = {
+            trackId: 2947516331, // Die With A Smile
+            wpm: 85,
+            acc: 98,
+            start: 45,
+            punc: true,
+            num: false,
+            adlib: true
+        };
+        const token = encodeChallengeToken(payload);
+        assert.ok(typeof token === 'string');
+        assert.equal(token.length, 16);
+        assert.match(token, /^[A-Za-z0-9_-]{16}$/);
+
+        // Verify space savings: 16 chars vs 85 chars of plain query parameters (~81% reduction)
+        const plainLength = 'trackId=2947516331&wpm=85&acc=98&start=45&punc=1&num=0&adlib=1'.length;
+        assert.ok(token.length < plainLength);
+    });
+
+    test('decodeChallengeToken accurately restores all fields from v3 Deezer trackId token', () => {
+        const payload = {
+            trackId: 2947516331,
+            wpm: 85,
+            acc: 98,
+            start: 45,
+            punc: true,
+            num: false,
+            adlib: true
+        };
+        const token = encodeChallengeToken(payload);
+        const decoded = decodeChallengeToken(token);
+        assert.deepEqual(decoded, payload);
+    });
+
+    test('decodeChallengeToken accurately handles legacy Deezer track IDs (small numbers)', () => {
+        const payload = {
+            trackId: 62724015, // Locked out of Heaven
+            wpm: 110,
+            acc: 95,
+            start: 12,
+            punc: false,
+            num: true,
+            adlib: false
+        };
+        const token = encodeChallengeToken(payload);
+        assert.equal(token.length, 16);
+        const decoded = decodeChallengeToken(token);
+        assert.deepEqual(decoded, payload);
+    });
+
+    test('generateChallengeUrl builds ultra-compact ?c= URL when trackId is present', () => {
+        const url = generateChallengeUrl('Die With A Smile', 'Lady Gaga', 85, 98, 45, {
+            punc: true,
+            num: false,
+            adlib: true,
+            trackId: 2947516331
+        });
+        assert.ok(url.startsWith('https://type.vincentchan.uk/?c='));
+        const token = new URL(url).searchParams.get('c');
+        assert.equal(token.length, 16);
+        const decoded = decodeChallengeToken(token);
+        assert.equal(decoded.trackId, 2947516331);
+        assert.equal(decoded.wpm, 85);
+        assert.equal(decoded.acc, 98);
+        assert.equal(decoded.start, 45);
+        assert.equal(decoded.punc, true);
+        assert.equal(decoded.num, false);
+        assert.equal(decoded.adlib, true);
+    });
+
+    test('generateShareText embeds ultra-compact Deezer track ID link when selectedTrack has id', () => {
+        _setState({
+            isSharedGame: true,
+            completedTyping: true,
+            selectedTrack: {
+                id: 2947516331,
+                title: 'Die With A Smile',
+                artist: { name: 'Lady Gaga' },
+                album: { title: 'Die With A Smile', cover_medium: 'https://example.com/art.jpg' }
+            },
+            finalWPM: 85,
+            finalAccuracy: 98,
+            currentStartIndex: 45,
+            attemptHistory: []
+        });
+
+        const shareText = generateShareText();
+        assert.ok(shareText.includes('TuneTyper'));
+        assert.ok(shareText.includes('"Die With A Smile" — Lady Gaga'));
+        assert.ok(shareText.includes('85 WPM'));
+
+        const match = shareText.match(/\?c=([A-Za-z0-9_-]+)/);
+        assert.ok(match);
+        const token = match[1];
+        assert.equal(token.length, 16);
+        const decoded = decodeChallengeToken(token);
+        assert.equal(decoded.trackId, 2947516331);
+        assert.equal(decoded.wpm, 85);
+    });
+
+    test('parseChallengeParams decodes v3 trackId token from query and hash', () => {
+        const token = encodeChallengeToken({
+            trackId: 2947516331,
+            wpm: 85,
+            acc: 98,
+            start: 45,
+            punc: true,
+            num: false,
+            adlib: true
+        });
+
+        const queryParsed = parseChallengeParams(`?c=${token}`);
+        assert.equal(queryParsed.trackId, 2947516331);
+        assert.equal(queryParsed.wpm, 85);
+
+        const hashParsed = parseChallengeParams(`#c=${token}`);
+        assert.equal(hashParsed.trackId, 2947516331);
+        assert.equal(hashParsed.wpm, 85);
+    });
+
+    test('parseChallengeParams extracts trackId from direct ?id= and ?trackId= parameters', () => {
+        const parsed1 = parseChallengeParams('?id=2947516331&wpm=85&start=45&punc=1');
+        assert.equal(parsed1.trackId, 2947516331);
+        assert.equal(parsed1.wpm, 85);
+        assert.equal(parsed1.start, 45);
+        assert.equal(parsed1.punc, true);
+
+        const parsed2 = parseChallengeParams('?trackId=62724015&wpm=90');
+        assert.equal(parsed2.trackId, 62724015);
+        assert.equal(parsed2.wpm, 90);
+    });
+
+    test('loadSharedChallengeByTrackId hydrates track from /track-details and starts typing challenge', async () => {
+        resetGame(true);
+
+        const originalFetch = global.fetch;
+        global.fetch = async (url) => {
+            if (url.includes('/track-details?trackId=2947516331')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        id: 2947516331,
+                        title: 'Die With A Smile',
+                        artist: { id: 75491, name: 'Lady Gaga' },
+                        album: { id: 629506181, title: 'Die With A Smile', cover_medium: 'https://example.com/cover.jpg' },
+                        preview: 'https://example.com/preview.mp3'
+                    })
+                };
+            }
+            if (url.includes('/lyrics')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        lyrics: 'I, I just woke up from a dream\nWhere you and I had to say goodbye\nAnd I dont know what it all means\nBut since I survived, I realized\nWherever you go, thats where I follow'
+                    })
+                };
+            }
+            return { ok: false };
+        };
+
+        try {
+            await loadSharedChallengeByTrackId(2947516331, 1, {
+                punc: true,
+                num: false,
+                adlib: true
+            });
+
+            const state = _getState();
+            assert.equal(state.isSharedGame, true);
+            assert.equal(state.selectedTrack.id, 2947516331);
+            assert.equal(state.selectedTrack.title, 'Die With A Smile');
+            assert.equal(state.selectedTrack.artist.name, 'Lady Gaga');
+            assert.equal(state.removePunctuationCheckbox.checked, true);
+            assert.equal(state.includeNumbersCheckbox.checked, false);
+            assert.equal(state.removeAdlibsCheckbox.checked, true);
+            assert.equal(state.removePunctuationCheckbox.disabled, true);
+            assert.equal(state.includeNumbersCheckbox.disabled, true);
+            assert.equal(state.removeAdlibsCheckbox.disabled, true);
+        } finally {
+            global.fetch = originalFetch;
+        }
+    });
+
+    test('loadSharedChallengeByTrackId renders fallback button when track is not found', async () => {
+        resetGame(true);
+
+        const originalFetch = global.fetch;
+        global.fetch = async (url) => {
+            if (url.includes('/track-details')) {
+                return {
+                    ok: false,
+                    status: 404,
+                    json: async () => ({ error: 'Track not found' })
+                };
+            }
+            return { ok: false };
+        };
+
+        try {
+            await loadSharedChallengeByTrackId(999999999, 0);
+            const banner = global.document.getElementById('challenge-banner');
+            assert.ok(banner.innerHTML.includes('Could not load challenge for track ID'));
+            assert.ok(banner.innerHTML.includes('challenge-fallback-btn'));
+        } finally {
+            global.fetch = originalFetch;
+        }
     });
 });

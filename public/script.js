@@ -432,7 +432,7 @@ function normalizeTextForTyping(text, removePunctuation = false, removeAdlibs = 
 }
 
 function escapeHtml(str) {
-    return str
+    return String(str ?? '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
@@ -1474,21 +1474,27 @@ function removeParentheses(str) {
 
 /**
  * Binary Field-Packing Link Compressor (inspired by ha.mr / PortalRunner)
- * Compresses challenge state into a compact, URL-safe Base64 token:
- * - 2 bytes: WPM (0-32767, with bit 15 set as v2 flag marker)
- * - 1 byte:  Accuracy (0-100)
- * - 2 bytes: Start Index (0-65535)
- * - 1 byte:  Flags (bit 0: punctuation, bit 1: numbers, bit 2: ad-libs)
- * - 1 byte:  Artist byte-length (0-255)
- * - N bytes: UTF-8 Artist
- * - M bytes: UTF-8 Track
- * 
- * Saves ~37% URL length over plain query parameters while preventing casual tampering.
+ *
+ * Version 3 format (ultra-compact Deezer track ID):
+ * - Byte 0: Flags/Format byte with bits 7 and 6 set (0xC0 | ((wpm >> 8) & 0x3f))
+ * - Byte 1: WPM low byte (0-255)
+ * - Byte 2: Accuracy (0-255)
+ * - Byte 3-4: Start Index (uint16, big-endian)
+ * - Byte 5: Game condition flags (bit 0: punctuation, bit 1: numbers, bit 2: ad-libs)
+ * - Byte 6-11: Deezer Track ID (48-bit unsigned integer, big-endian)
+ * Total: 12 bytes -> exactly 16 Base64URL characters!
+ *
+ * Version 2 format (fallback with artist & track strings):
+ * - Bit 7 set, bit 6 clear on Byte 0 (0x80 | ((wpm >> 8) & 0x3f))
+ * - 1 byte Acc, 2 bytes Start, 1 byte Flags, 1 byte Artist byte-length, UTF-8 Artist, UTF-8 Track
+ *
+ * Version 1 format (legacy 6-byte header, bit 7 of Byte 0 is 0):
+ * - 2 bytes WPM, 1 byte Acc, 2 bytes Start, 1 byte Artist byte-length, UTF-8 Artist, UTF-8 Track
  */
 function encodeChallengeToken(payload) {
-    if (!payload || (!payload.artist && !payload.track)) return '';
+    if (!payload) return '';
     try {
-        const wpm = Math.max(0, Math.min(32767, payload.wpm ?? 0));
+        const wpm = Math.max(0, Math.min(16383, payload.wpm ?? 0));
         const acc = Math.max(0, Math.min(255, payload.acc ?? 0));
         const start = Math.max(0, Math.min(65535, payload.start ?? 0));
 
@@ -1501,6 +1507,33 @@ function encodeChallengeToken(payload) {
         if (num) flags |= 2;
         if (adlib) flags |= 4;
 
+        // If trackId is provided, encode into compact v3 format (12 bytes -> 16 chars Base64URL)
+        const trackId = (payload.trackId !== undefined && payload.trackId !== null) ? Number(payload.trackId) : null;
+        if (trackId && !isNaN(trackId) && trackId > 0) {
+            const u8 = new Uint8Array(12);
+            // Bit 7 and bit 6 set on byte 0 denotes v3 Deezer track ID format
+            u8[0] = ((wpm >> 8) & 0x3f) | 0xc0;
+            u8[1] = wpm & 0xff;
+            u8[2] = acc & 0xff;
+            u8[3] = (start >> 8) & 0xff;
+            u8[4] = start & 0xff;
+            u8[5] = flags & 0xff;
+
+            // 48-bit unsigned trackId (bytes 6-11, supports up to 281 trillion tracks)
+            const b = BigInt(trackId);
+            for (let i = 0; i < 6; i++) {
+                u8[11 - i] = Number((b >> BigInt(i * 8)) & 0xffn);
+            }
+
+            let binary = '';
+            for (let i = 0; i < u8.length; i++) {
+                binary += String.fromCharCode(u8[i]);
+            }
+            return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+
+        if (!payload.artist && !payload.track) return '';
+
         const encoder = new TextEncoder();
         const artistBytes = encoder.encode(payload.artist || '');
         const trackBytes = encoder.encode(payload.track || '');
@@ -1509,8 +1542,8 @@ function encodeChallengeToken(payload) {
 
         const totalLen = 7 + artistBytes.length + trackBytes.length;
         const u8 = new Uint8Array(totalLen);
-        // Bit 7 of byte 0 indicates v2 format with conditions flags
-        u8[0] = ((wpm >> 8) & 0x7f) | 0x80;
+        // Bit 7 set, bit 6 clear on byte 0 indicates v2 format with conditions flags
+        u8[0] = ((wpm >> 8) & 0x3f) | 0x80;
         u8[1] = wpm & 0xff;
         u8[2] = acc & 0xff;
         u8[3] = (start >> 8) & 0xff;
@@ -1541,10 +1574,39 @@ function decodeChallengeToken(token) {
             u8[i] = binary.charCodeAt(i);
         }
 
-        // 1. Binary packed v2 format (with flags byte and bit 7 set on u8[0])
-        const isV2 = (u8[0] & 0x80) !== 0;
+        // 1. Binary packed v3 format (with trackId, bits 7 & 6 set on u8[0], exactly 12 bytes)
+        const isV3 = (u8[0] & 0xc0) === 0xc0 && u8.length === 12;
+        if (isV3) {
+            const wpm = ((u8[0] & 0x3f) << 8) | u8[1];
+            const acc = u8[2];
+            const start = (u8[3] << 8) | u8[4];
+            const flags = u8[5];
+            const punc = (flags & 1) !== 0;
+            const num = (flags & 2) !== 0;
+            const adlib = (flags & 4) !== 0;
+
+            let trackId = 0n;
+            for (let i = 6; i < 12; i++) {
+                trackId = (trackId << 8n) | BigInt(u8[i]);
+            }
+            const trackIdNum = Number(trackId);
+            if (trackIdNum > 0) {
+                return {
+                    trackId: trackIdNum,
+                    wpm: wpm > 0 ? wpm : null,
+                    acc: acc > 0 ? acc : null,
+                    start: start >= 0 ? start : null,
+                    punc,
+                    num,
+                    adlib
+                };
+            }
+        }
+
+        // 2. Binary packed v2 format (with flags byte and bit 7 set, bit 6 clear)
+        const isV2 = (u8[0] & 0x80) !== 0 && (u8[0] & 0x40) === 0;
         if (isV2 && u8.length >= 7) {
-            const wpm = ((u8[0] & 0x7f) << 8) | u8[1];
+            const wpm = ((u8[0] & 0x3f) << 8) | u8[1];
             const acc = u8[2];
             const start = (u8[3] << 8) | u8[4];
             const flags = u8[5];
@@ -1571,7 +1633,7 @@ function decodeChallengeToken(token) {
             }
         }
 
-        // 2. Binary packed v1 format (legacy 6-byte header, u8[0] < 0x80)
+        // 3. Binary packed v1 format (legacy 6-byte header, u8[0] < 0x80)
         if (u8.length >= 6) {
             const wpm = (u8[0] << 8) | u8[1];
             const acc = u8[2];
@@ -1596,7 +1658,7 @@ function decodeChallengeToken(token) {
             }
         }
 
-        // 3. Legacy JSON array fallback
+        // 4. Legacy JSON array fallback
         const decoder = new TextDecoder();
         const jsonStr = decoder.decode(u8);
         const arr = JSON.parse(jsonStr);
@@ -1633,8 +1695,12 @@ function generateChallengeUrl(trackTitle, artistName, wpm, acc, startIndex, opti
     const adlib = (options && options.adlib !== undefined)
         ? Boolean(options.adlib)
         : Boolean(removeAdlibsCheckbox ? removeAdlibsCheckbox.checked : true);
+    const trackId = (options && options.trackId !== undefined && options.trackId !== null)
+        ? options.trackId
+        : (selectedTrack && selectedTrack.id ? selectedTrack.id : null);
 
     const token = encodeChallengeToken({
+        trackId,
         artist: artistName,
         track: trackTitle,
         wpm,
@@ -1648,6 +1714,7 @@ function generateChallengeUrl(trackTitle, artistName, wpm, acc, startIndex, opti
         return `${origin}${pathname}?c=${token}`;
     }
     const params = new URLSearchParams();
+    if (trackId) params.set('id', trackId);
     if (artistName) params.set('artist', artistName);
     if (trackTitle) params.set('track', trackTitle);
     if (wpm !== undefined && wpm !== null && !isNaN(wpm)) params.set('wpm', wpm);
@@ -1662,6 +1729,7 @@ function generateChallengeUrl(trackTitle, artistName, wpm, acc, startIndex, opti
 function generateShareText() {
     const trackTitle = selectedTrack ? selectedTrack.title : 'Unknown';
     const artistName = (selectedTrack && selectedTrack.artist) ? selectedTrack.artist.name : 'Unknown';
+    const trackId = selectedTrack ? (selectedTrack.id || null) : null;
     const isCompleted = completedTyping || (processedWords && processedWords.length > 0 && currentWordIndex >= processedWords.length);
     const wpm = isCompleted ? (finalWPM ?? calculateWPM()) : null;
 
@@ -1671,7 +1739,8 @@ function generateShareText() {
     const shareUrl = generateChallengeUrl(trackTitle, artistName, wpm, null, currentStartIndex, {
         punc: currentPunc,
         num: currentNum,
-        adlib: currentAdlib
+        adlib: currentAdlib,
+        trackId
     });
 
     const invite = isCompleted ? `Can you beat me? ${shareUrl}` : `Play here: ${shareUrl}`;
@@ -1730,12 +1799,13 @@ async function copyShareScore() {
 async function copyChallengeLink() {
     const trackTitle = selectedTrack ? selectedTrack.title : '';
     const artistName = (selectedTrack && selectedTrack.artist) ? selectedTrack.artist.name : '';
+    const trackId = selectedTrack ? (selectedTrack.id || null) : null;
     const isCompleted = completedTyping || (processedWords && processedWords.length > 0 && currentWordIndex >= processedWords.length);
     const wpm = isCompleted ? (finalWPM ?? calculateWPM()) : null;
     const punc = removePunctuationCheckbox ? removePunctuationCheckbox.checked : false;
     const num = includeNumbersCheckbox ? includeNumbersCheckbox.checked : false;
     const adlib = removeAdlibsCheckbox ? removeAdlibsCheckbox.checked : true;
-    const url = generateChallengeUrl(trackTitle, artistName, wpm, null, currentStartIndex, { punc, num, adlib });
+    const url = generateChallengeUrl(trackTitle, artistName, wpm, null, currentStartIndex, { punc, num, adlib, trackId });
 
     let copied = false;
 
@@ -1813,10 +1883,12 @@ function showFinalInfo() {
     const currentPunc = removePunctuationCheckbox ? removePunctuationCheckbox.checked : false;
     const currentNum = includeNumbersCheckbox ? includeNumbersCheckbox.checked : false;
     const currentAdlib = removeAdlibsCheckbox ? removeAdlibsCheckbox.checked : true;
+    const trackId = selectedTrack ? (selectedTrack.id || null) : null;
     const challengeUrl = generateChallengeUrl(trackTitle, artistName, isCompleted ? finalWPM : null, null, currentStartIndex, {
         punc: currentPunc,
         num: currentNum,
-        adlib: currentAdlib
+        adlib: currentAdlib,
+        trackId
     });
 
     let infoHTML = `
@@ -2811,11 +2883,13 @@ function parseChallengeParams(queryString) {
     const token = params.get('c');
     if (token) {
         const decoded = decodeChallengeToken(token);
-        if (decoded && (decoded.artist || decoded.track)) {
+        if (decoded && (decoded.trackId || decoded.artist || decoded.track)) {
             return decoded;
         }
     }
 
+    const trackIdRaw = params.get('id') || params.get('trackId') || null;
+    const trackId = (trackIdRaw && !isNaN(parseInt(trackIdRaw, 10))) ? parseInt(trackIdRaw, 10) : null;
     const artist = params.get('artist') || null;
     const track = params.get('track') || null;
     const wpmRaw = params.get('wpm');
@@ -2830,8 +2904,10 @@ function parseChallengeParams(queryString) {
     const num = params.has('num') ? (params.get('num') === '1' || params.get('num') === 'true') : false;
     const adlib = params.has('adlib') ? (params.get('adlib') === '1' || params.get('adlib') === 'true') : true;
 
-    if (!artist && !track) return null;
-    return { artist, track, wpm, acc, start, punc, num, adlib };
+    if (!trackId && !artist && !track) return null;
+    const result = { artist, track, wpm, acc, start, punc, num, adlib };
+    if (trackId) result.trackId = trackId;
+    return result;
 }
 
 async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = null, options = null) {
@@ -2923,6 +2999,85 @@ async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = nu
     }
 }
 
+async function loadSharedChallengeByTrackId(trackId, targetStartIndex = null, options = null) {
+    resetGame(true);
+    isSharedGame = true;
+    currentGameMode = 'song';
+
+    // Synchronize typing conditions so challengers play under identical conditions
+    if (options) {
+        if (options.punc !== undefined && removePunctuationCheckbox) {
+            removePunctuationCheckbox.checked = Boolean(options.punc);
+        }
+        if (options.num !== undefined && includeNumbersCheckbox) {
+            includeNumbersCheckbox.checked = Boolean(options.num);
+        }
+        if (options.adlib !== undefined && removeAdlibsCheckbox) {
+            removeAdlibsCheckbox.checked = Boolean(options.adlib);
+        }
+    }
+
+    // Disable condition toggles during challenge play to prevent changing conditions
+    if (removePunctuationCheckbox) removePunctuationCheckbox.disabled = true;
+    if (includeNumbersCheckbox) includeNumbersCheckbox.disabled = true;
+    if (removeAdlibsCheckbox) removeAdlibsCheckbox.disabled = true;
+
+    cancelInputTyping(false);
+    updateChallengeBanner();
+    startLoadingBar();
+
+    try {
+        const response = await apiFetch(`/track-details?trackId=${encodeURIComponent(trackId)}`);
+        if (!response.ok) throw new Error('Failed to find track on Deezer.');
+        const trackDetails = await response.json();
+        if (!trackDetails || !trackDetails.id || !trackDetails.title) {
+            throw new Error(`Track not found: ${trackId}`);
+        }
+
+        selectedTrack = trackDetails;
+        hydrateSelectedTrackPreview();
+
+        const lyricsArtist = (trackDetails.artist && trackDetails.artist.name) || '';
+        const lyricsTrack = trackDetails.title || '';
+
+        if (artistInput) {
+            artistInput.value = lyricsArtist ? `${lyricsArtist} - ${lyricsTrack}` : lyricsTrack;
+            syncArtistClearButton();
+        }
+
+        updateChallengeBanner();
+
+        const lyrics = await fetchLyrics(lyricsArtist, lyricsTrack);
+        cachedSongLyrics[`${lyricsArtist}-${lyricsTrack}`.toLowerCase()] = { lyrics, track: trackDetails };
+
+        typeSection = extractRandomSection(lyrics, 150, 300, targetStartIndex);
+        updateDisplayedText();
+        if (endGameBtn) endGameBtn.style.display = 'inline-block';
+    } catch (error) {
+        console.error('Error loading shared challenge by track ID:', error);
+        stopLoadingBar();
+        if (challengeBanner) {
+            challengeBanner.style.display = 'flex';
+            challengeBanner.innerHTML = `⚠️ Could not load challenge for track ID <strong>${escapeHtml(trackId)}</strong>. <button id="challenge-fallback-btn" style="margin-left:8px;padding:4px 8px;cursor:pointer;background:#333;color:#fff;border:1px solid #555;border-radius:4px;">Play random song</button>`;
+            const fallbackBtn = document.getElementById('challenge-fallback-btn');
+            if (fallbackBtn) {
+                fallbackBtn.addEventListener('click', () => {
+                    isSharedGame = false;
+                    challengerWPM = null;
+                    challengerAcc = null;
+                    if (challengeBanner) challengeBanner.style.display = 'none';
+                    if (removePunctuationCheckbox) removePunctuationCheckbox.disabled = false;
+                    if (includeNumbersCheckbox) includeNumbersCheckbox.disabled = false;
+                    if (removeAdlibsCheckbox) removeAdlibsCheckbox.disabled = false;
+                    loadDefaultPlaylist();
+                });
+            }
+        }
+    } finally {
+        stopLoadingBar();
+    }
+}
+
 function getArtistFromLocationPath(pathname) {
     if (typeof window !== 'undefined' && window.__INITIAL_ARTIST__ && window.__INITIAL_ARTIST__.name) {
         return window.__INITIAL_ARTIST__.name;
@@ -2955,7 +3110,15 @@ async function parseAndLoadUrlParameters() {
         challengerAcc = parsed.acc;
         challengeStartIndex = parsed.start;
 
-        if (parsed.track) {
+        if (parsed.trackId) {
+            isSharedGame = true;
+            await loadSharedChallengeByTrackId(parsed.trackId, parsed.start, {
+                punc: parsed.punc,
+                num: parsed.num,
+                adlib: parsed.adlib
+            });
+            return true;
+        } else if (parsed.track) {
             isSharedGame = true;
             await loadSharedChallenge(parsed.artist, parsed.track, parsed.start, {
                 punc: parsed.punc,
@@ -3325,6 +3488,7 @@ if (typeof module !== 'undefined' && module.exports) {
         generateShareText,
         extractRandomSection,
         loadSharedChallenge,
+        loadSharedChallengeByTrackId,
         startGuessingPhase,
         renderMysteryTitle,
         updateHintsUI,
