@@ -719,10 +719,10 @@ function resetGame(preserveChallenge = false) {
         typingArea.value = '';
         typingArea.style.display = 'block';
         typingArea.disabled = true;
-        typingArea.placeholder = 'Loading mystery song...';
+        typingArea.placeholder = 'Loading song...';
         if (typingArea.classList) typingArea.classList.remove('incorrect');
     }
-    if (displayText) displayText.innerHTML = '<span class="loading-lyrics">Loading mystery song...</span>';
+    if (displayText) displayText.innerHTML = '<span class="loading-lyrics">Loading song...</span>';
     if (wpmResult) wpmResult.textContent = '';
     if (songInfo) songInfo.innerHTML = '';
     if (guessSection) guessSection.style.display = 'none';
