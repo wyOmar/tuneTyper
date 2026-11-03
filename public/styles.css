@@ -326,6 +326,13 @@ h1 {
     position: relative; /* so word offsetTop is relative to this box (auto-scroll) */
 }
 
+.text-display .loading-lyrics {
+    color: #888;
+    user-select: none;
+    pointer-events: none;
+    font-style: italic;
+}
+
 .text-display .word {
     transition: color 0.15s;
 }

@@ -272,4 +272,17 @@ test('Curated Playlists UI Integration & Shelf Switching', async (t) => {
             global.document = originalDoc;
         }
     });
+
+    await t.test('index.html contains non-empty display-text loading state and disabled typing-area to optimize initial LCP without early game start', () => {
+        const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+        assert.match(indexHtml, /<p id="display-text" class="text-display"><span class="loading-lyrics">Loading song\.\.\.<\/span><\/p>/);
+        assert.match(indexHtml, /placeholder="Loading song\.\.\."/);
+        assert.match(indexHtml, /id="typing-area"[^>]*disabled/);
+    });
+
+    await t.test('styles.css defines loading-lyrics muted styling', () => {
+        const stylesCss = fs.readFileSync(path.join(__dirname, '..', 'public', 'styles.css'), 'utf8');
+        assert.match(stylesCss, /\.text-display \.loading-lyrics\s*\{[^}]*font-style:\s*italic/);
+    });
 });
+

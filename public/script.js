@@ -286,7 +286,6 @@ async function loadCuratedPlaylist(playlistId = currentPlaylistId) {
             // Use pre-warmed lyrics immediately if already attached to track (0 network calls, 0 OVH dependency)
             if (typeof randomTrack.lyrics === 'string' && randomTrack.lyrics.trim()) {
                 lyrics = randomTrack.lyrics;
-                await fakeTypePlaceholder(artistInput, `${trackArtist}`, 25);
                 cachedSongLyrics[`${trackArtist}-${trackTitle}`] = lyrics;
 
                 selectedTrack = randomTrack;
@@ -294,13 +293,13 @@ async function loadCuratedPlaylist(playlistId = currentPlaylistId) {
                 ensureSelectedArtistCandidates();
                 typeSection = extractRandomSection(lyrics);
                 updateDisplayedText();
-                endGameBtn.style.display = 'inline-block';
+                if (endGameBtn) endGameBtn.style.display = 'inline-block';
+                fakeTypePlaceholder(artistInput, `${trackArtist}`, 25);
                 console.log(`Loaded pre-warmed lyrics for: ${trackTitle} by ${trackArtist}`);
             } else {
                 console.log(`Trying Song: ${trackTitle} by ${trackArtist}`);
                 try {
                     lyrics = await fetchLyrics(trackArtist, trackTitle);
-                    await fakeTypePlaceholder(artistInput, `${trackArtist}`, 25);
                     cachedSongLyrics[`${trackArtist}-${trackTitle}`] = lyrics;
 
                     selectedTrack = randomTrack;
@@ -308,7 +307,8 @@ async function loadCuratedPlaylist(playlistId = currentPlaylistId) {
                     ensureSelectedArtistCandidates();
                     typeSection = extractRandomSection(lyrics);
                     updateDisplayedText();
-                    endGameBtn.style.display = 'inline-block';
+                    if (endGameBtn) endGameBtn.style.display = 'inline-block';
+                    fakeTypePlaceholder(artistInput, `${trackArtist}`, 25);
 
                     console.log(`Loaded lyrics for: ${trackTitle} by ${trackArtist}`);
                 } catch (error) {
@@ -318,10 +318,16 @@ async function loadCuratedPlaylist(playlistId = currentPlaylistId) {
         }
 
         if (!lyrics) {
+            if (displayText && !typeSection) {
+                displayText.innerHTML = '<span class="loading-lyrics">Failed to load lyrics. Try selecting another playlist.</span>';
+            }
             throw new Error('No lyrics available for any track in the playlist.');
         }
     } catch (error) {
         console.error(error.message);
+        if (displayText && !typeSection) {
+            displayText.innerHTML = '<span class="loading-lyrics">Failed to load lyrics. Try selecting another playlist.</span>';
+        }
     }
 }
 
@@ -560,6 +566,7 @@ function normalizeText(text) {
 }
 
 async function fakeTypePlaceholder(element, text, speed = 100) {
+    if (!element) return;
     element.placeholder = '';  // Clear placeholder
     for (let i = 0; i < text.length; i++) {
         element.placeholder += text.charAt(i);
@@ -712,9 +719,10 @@ function resetGame(preserveChallenge = false) {
         typingArea.value = '';
         typingArea.style.display = 'block';
         typingArea.disabled = true;
+        typingArea.placeholder = 'Loading song...';
         if (typingArea.classList) typingArea.classList.remove('incorrect');
     }
-    if (displayText) displayText.innerHTML = '';
+    if (displayText) displayText.innerHTML = '<span class="loading-lyrics">Loading song...</span>';
     if (wpmResult) wpmResult.textContent = '';
     if (songInfo) songInfo.innerHTML = '';
     if (guessSection) guessSection.style.display = 'none';
@@ -764,6 +772,7 @@ function updateDisplayedText() {
     updateWordHighlight();
     if (typingArea) {
         typingArea.disabled = false;
+        typingArea.placeholder = 'Start typing here...';
         typingArea.focus();
     }
 }
