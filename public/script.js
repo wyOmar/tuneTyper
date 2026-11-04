@@ -78,6 +78,8 @@ const SNIPPET_DURATIONS = [2, 5, 10, 18, 30];
 let snippetAudio = null;
 let snippetProgressAnim = null;
 let isSnippetPlaying = false;
+let isSnippetStarting = false;
+let snippetSessionId = 0;
 let attemptHistory = []; // stores 'wrong', 'skipped', or 'correct'
 let candidateSongs = [];
 let artistCandidateCache = {};
@@ -92,6 +94,42 @@ let sectionTwo = "";
 let sectionSelected = "";
 // Mobile / virtual keyboard input state
 let mobileInputOverride = null; // null = auto-detect via pointer/UA; boolean = test override
+// Monotonic token identifying the active song load. Every loader captures it at start and bails
+// after each await if it changed, so a slow earlier response can never overwrite a newer game.
+let gameLoadToken = 0;
+
+function beginGameLoad() {
+    gameLoadToken++;
+    return gameLoadToken;
+}
+
+function isLoadStale(token) {
+    return token !== gameLoadToken;
+}
+
+// Single client-side lyrics cache: key = normalized "artist - title", value = { lyrics, track }
+function getLyricsCacheKey(artist, title) {
+    const norm = (s) => String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+    return `${norm(artist)} - ${norm(title)}`;
+}
+
+function cacheLyrics(key, lyrics, track = null) {
+    if (!key || typeof lyrics !== 'string') return;
+    cachedSongLyrics[key] = { lyrics, track: track || null };
+}
+
+function getCachedLyrics(key) {
+    const entry = key ? cachedSongLyrics[key] : null;
+    if (!entry) return null;
+    if (typeof entry === 'string') return { lyrics: entry, track: null };
+    if (typeof entry.lyrics !== 'string') return null;
+    return { lyrics: entry.lyrics, track: entry.track || null };
+}
+
+function getTrackArtistName(track) {
+    if (!track || !track.artist) return '';
+    return typeof track.artist === 'object' ? String(track.artist.name || '') : String(track.artist);
+}
 
 function isMobileInputMode() {
     if (mobileInputOverride !== null) return Boolean(mobileInputOverride);
@@ -205,16 +243,19 @@ async function fetchArtistId(artistName) {
     const response = await apiFetch(`/tracks?artist=${encodeURIComponent(normArtist)}`);
     if (!response.ok) throw new Error('Failed to fetch artist data.');
     const data = await response.json();
-    if (data.data.length === 0) throw new Error('Artist not found.');
+    const results = data && Array.isArray(data.data) ? data.data : [];
+    if (results.length === 0) throw new Error('Artist not found.');
 
-    
-    const topResults = data.data.slice(0, 5);
+    const topResults = results.slice(0, 5);
     const artistCount = {};
 
     topResults.forEach(track => {
-        const artistId = track.artist.id;
+        const artistId = track?.artist?.id;
+        if (artistId === undefined || artistId === null) return;
         artistCount[artistId] = (artistCount[artistId] || 0) + 1;
     });
+
+    if (Object.keys(artistCount).length === 0) throw new Error('Artist not found.');
 
     const mostFrequentArtistId = Object.keys(artistCount).reduce((a, b) =>
         artistCount[a] > artistCount[b] ? a : b
@@ -252,6 +293,7 @@ function updatePlaylistCardsActiveState(activeId) {
 }
 
 async function loadCuratedPlaylist(playlistId = currentPlaylistId) {
+    const loadToken = beginGameLoad();
     currentGameMode = 'artist';
     currentPlaylistId = String(playlistId || '13650203641').trim();
     updatePlaylistCardsActiveState(currentPlaylistId);
@@ -264,157 +306,171 @@ async function loadCuratedPlaylist(playlistId = currentPlaylistId) {
 
     try {
         const response = await apiFetch(`/default?id=${encodeURIComponent(currentPlaylistId)}`);
+        if (isLoadStale(loadToken)) return;
         if (!response.ok) throw new Error('Failed to fetch playlist data.');
 
         const data = await response.json();
-        const tracks = data.tracks && Array.isArray(data.tracks.data) ? data.tracks.data : [];
+        if (isLoadStale(loadToken)) return;
+        const tracks = data && data.tracks && Array.isArray(data.tracks.data) ? data.tracks.data : [];
 
         if (tracks.length === 0) throw new Error('No tracks found in the playlist.');
 
         const triedTracks = new Set();
-        let lyrics = null;
+        let loaded = false;
 
-        while (triedTracks.size < tracks.length && !lyrics) {
+        while (triedTracks.size < tracks.length && !loaded) {
             const randomIndex = Math.floor(Math.random() * tracks.length);
             if (triedTracks.has(randomIndex)) continue;
 
             triedTracks.add(randomIndex);
             const randomTrack = tracks[randomIndex];
-            const trackArtist = randomTrack.artist.name;
-            const trackTitle = randomTrack.title;
+            const trackArtist = getTrackArtistName(randomTrack);
+            const trackTitle = randomTrack?.title;
+            if (!trackArtist || !trackTitle) continue; // malformed track entry
 
+            let lyrics = null;
             // Use pre-warmed lyrics immediately if already attached to track (0 network calls, 0 OVH dependency)
             if (typeof randomTrack.lyrics === 'string' && randomTrack.lyrics.trim()) {
                 lyrics = randomTrack.lyrics;
-                cachedSongLyrics[`${trackArtist}-${trackTitle}`] = lyrics;
-
-                selectedTrack = randomTrack;
-                hydrateSelectedTrackPreview();
-                ensureSelectedArtistCandidates();
-                typeSection = extractRandomSection(lyrics);
-                updateDisplayedText();
-                if (endGameBtn) endGameBtn.style.display = 'inline-block';
-                fakeTypePlaceholder(artistInput, `${trackArtist}`, 25);
-                console.log(`Loaded pre-warmed lyrics for: ${trackTitle} by ${trackArtist}`);
             } else {
                 console.log(`Trying Song: ${trackTitle} by ${trackArtist}`);
                 try {
                     lyrics = await fetchLyrics(trackArtist, trackTitle);
-                    cachedSongLyrics[`${trackArtist}-${trackTitle}`] = lyrics;
-
-                    selectedTrack = randomTrack;
-                    hydrateSelectedTrackPreview();
-                    ensureSelectedArtistCandidates();
-                    typeSection = extractRandomSection(lyrics);
-                    updateDisplayedText();
-                    if (endGameBtn) endGameBtn.style.display = 'inline-block';
-                    fakeTypePlaceholder(artistInput, `${trackArtist}`, 25);
-
-                    console.log(`Loaded lyrics for: ${trackTitle} by ${trackArtist}`);
                 } catch (error) {
+                    if (isLoadStale(loadToken)) return;
                     console.warn(`Lyrics not found for: ${trackTitle} by ${trackArtist}. Trying another song...`);
+                    continue;
                 }
+                if (isLoadStale(loadToken)) return;
             }
+
+            cacheLyrics(getLyricsCacheKey(trackArtist, trackTitle), lyrics, randomTrack);
+            if (!applyLoadedSong(randomTrack, lyrics)) {
+                console.warn(`No typeable lyrics for: ${trackTitle} by ${trackArtist}. Trying another song...`);
+                continue;
+            }
+            loaded = true;
+            ensureSelectedArtistCandidates();
+            fakeTypePlaceholder(artistInput, `${trackArtist}`, 25);
+            console.log(`Loaded lyrics for: ${trackTitle} by ${trackArtist}`);
         }
 
-        if (!lyrics) {
-            if (displayText && !typeSection) {
-                displayText.innerHTML = '<span class="loading-lyrics">Failed to load lyrics. Try selecting another playlist.</span>';
-            }
+        if (!loaded) {
             throw new Error('No lyrics available for any track in the playlist.');
         }
     } catch (error) {
+        if (isLoadStale(loadToken)) return;
         console.error(error.message);
         if (displayText && !typeSection) {
             displayText.innerHTML = '<span class="loading-lyrics">Failed to load lyrics. Try selecting another playlist.</span>';
         }
+        throw error;
     }
 }
 
 async function loadDefaultPlaylist() {
-    return loadCuratedPlaylist(currentPlaylistId);
+    try {
+        await loadCuratedPlaylist(currentPlaylistId);
+        return true;
+    } catch (_) {
+        // Failure message is already rendered in the lyrics box
+        return false;
+    }
 }
+// Gathers whole lines from startIndex until minLength is reached, then trims to maxLength at a word boundary.
+function sliceSectionFromLine(lines, startIndex, minLength, maxLength) {
+    let selectedText = '';
+    let index = startIndex;
+    while (selectedText.length < minLength && index < lines.length) {
+        selectedText += (selectedText ? '\n' : '') + lines[index];
+        index++;
+    }
+    const reachedMinLength = selectedText.length >= minLength;
+    if (selectedText.length > maxLength) {
+        selectedText = selectedText.slice(0, maxLength);
+        const lastSpace = selectedText.lastIndexOf(' ');
+        const lastSentenceEnd = selectedText.lastIndexOf('.');
+        const cutIndex = Math.max(lastSentenceEnd, lastSpace);
+        if (cutIndex > 0) {
+            selectedText = selectedText.slice(0, cutIndex).trim();
+        }
+    }
+    return { selectedText, reachedMinLength };
+}
+
+function commitSection(lines, startIndex, selectedText) {
+    sectionOne = lines.slice(0, startIndex).join('\n');
+    // Start sectionTwo right after the (possibly truncated) selection so no text is lost
+    sectionTwo = lines.slice(startIndex).join('\n').slice(selectedText.length).trim();
+    sectionSelected = selectedText.trim();
+    currentStartIndex = startIndex;
+    return sectionSelected;
+}
+
 // Utility Functions
 function extractRandomSection(text, minLength = 150, maxLength = 300, targetStartIndex = null) {
-    const lines = text.split(/\n/);
+    const lines = String(text ?? '').split(/\n/);
     if (lines.length === 0) return '';
 
     // If a deterministic start index is specified (e.g. from a shared challenge deep link)
     if (targetStartIndex !== null && targetStartIndex !== undefined && !isNaN(targetStartIndex)) {
         const parsedStart = parseInt(targetStartIndex, 10);
         if (parsedStart >= 0 && parsedStart < lines.length) {
-            let selectedText = '';
-            let totalLength = 0;
-            let startIndex = parsedStart;
-            let index = startIndex;
-            while (totalLength < minLength && index < lines.length) {
-                const line = lines[index];
-                selectedText += (selectedText ? '\n' : '') + line;
-                totalLength = selectedText.length;
-                index++;
-            }
+            const { selectedText } = sliceSectionFromLine(lines, parsedStart, minLength, maxLength);
             if (selectedText.length > 0) {
-                if (totalLength > maxLength) {
-                    selectedText = selectedText.slice(0, maxLength);
-                    const lastSpace = selectedText.lastIndexOf(' ');
-                    const lastSentenceEnd = selectedText.lastIndexOf('.');
-                    const cutIndex = Math.max(lastSentenceEnd, lastSpace);
-                    if (cutIndex > 0) {
-                        selectedText = selectedText.slice(0, cutIndex).trim();
-                    }
-                }
-                sectionOne = lines.slice(0, startIndex).join('\n');
-                sectionTwo = lines.slice(startIndex).join('\n').slice(selectedText.length).trim();
-                sectionSelected = selectedText.trim();
-                currentStartIndex = startIndex;
-                return selectedText.trim();
+                return commitSection(lines, parsedStart, selectedText);
             }
         }
     }
 
     for (let attempt = 0; attempt < 5; attempt++) {
-        let selectedText = '';
-        let totalLength = 0;
-        let startIndex = Math.floor(Math.random() * lines.length);
-
-        let index = startIndex;
-        while (totalLength < minLength && index < lines.length) {
-            const line = lines[index]; 
-            selectedText += (selectedText ? '\n' : '') + line;
-            totalLength = selectedText.length;
-            index++;
-        }
-
-        if (totalLength >= minLength) {
-            if (totalLength > maxLength) {
-                selectedText = selectedText.slice(0, maxLength);
-                const lastSpace = selectedText.lastIndexOf(' ');
-                const lastSentenceEnd = selectedText.lastIndexOf('.');
-                const cutIndex = Math.max(lastSentenceEnd, lastSpace);
-
-                if (cutIndex > 0) {
-                    selectedText = selectedText.slice(0, cutIndex).trim();
-                }
-            }
-            sectionOne = lines.slice(0, startIndex).join('\n'); 
-            // Start sectionTwo right after the (possibly truncated) selection so no text is lost
-            sectionTwo = lines.slice(startIndex).join('\n').slice(selectedText.length).trim();
-            sectionSelected = selectedText.trim();
-            currentStartIndex = startIndex;
-            // console.log("Selected Section:", selectedText);
-            // console.log("Section One (Before):", sectionOne);
-            // console.log("Section Two (After):", sectionTwo);
-
-            return selectedText.trim();
+        const startIndex = Math.floor(Math.random() * lines.length);
+        const { selectedText, reachedMinLength } = sliceSectionFromLine(lines, startIndex, minLength, maxLength);
+        if (reachedMinLength) {
+            return commitSection(lines, startIndex, selectedText);
         }
     }
-    // If all attempts fail, return the longest possible section
+
+    // If all attempts fail (e.g. short lyrics), take the section from the very start,
+    // cut at a word boundary like the deterministic path instead of mid-word.
     console.log(`Extract random section requirements failed`);
-    sectionOne = '';
-    sectionTwo = '';
-    sectionSelected = lines.join('\n').slice(0, maxLength).trim();
-    currentStartIndex = 0;
-    return sectionSelected;
+    const { selectedText } = sliceSectionFromLine(lines, 0, minLength, maxLength);
+    return commitSection(lines, 0, selectedText);
+}
+
+function countTypeableWords(text) {
+    const removePunctuation = !(removePunctuationCheckbox && removePunctuationCheckbox.checked);
+    const removeAdlibs = !(removeAdlibsCheckbox && removeAdlibsCheckbox.checked);
+    const removeNumbers = !(includeNumbersCheckbox && includeNumbersCheckbox.checked);
+    return normalizeTextForTyping(text, removePunctuation, removeAdlibs, removeNumbers)
+        .split(/\s+/)
+        .filter(Boolean).length;
+}
+
+// Picks a lyrics section that still contains typeable (Latin-script) words after normalization.
+// Returns null when the lyrics can't produce a playable game (e.g. entirely non-Latin script).
+function pickTypeableSection(lyrics, targetStartIndex = null) {
+    if (typeof lyrics !== 'string' || !lyrics.trim()) return null;
+    const deterministic = targetStartIndex !== null && targetStartIndex !== undefined && !isNaN(targetStartIndex);
+    const attempts = deterministic ? 1 : 5;
+    for (let i = 0; i < attempts; i++) {
+        const section = extractRandomSection(lyrics, 150, 300, deterministic ? targetStartIndex : null);
+        if (countTypeableWords(section) > 0) return section;
+    }
+    return null;
+}
+
+// Installs a loaded song as the active game. Returns false (leaving state untouched) if the
+// lyrics have nothing typeable, so callers can try another track or surface an error.
+function applyLoadedSong(track, lyrics, targetStartIndex = null) {
+    const section = pickTypeableSection(lyrics, targetStartIndex);
+    if (!section) return false;
+    selectedTrack = track;
+    hydrateSelectedTrackPreview();
+    typeSection = section;
+    updateDisplayedText();
+    if (endGameBtn) endGameBtn.style.display = 'inline-block';
+    return true;
 }
 
 function normalizeTextForTyping(text, removePunctuation = false, removeAdlibs = false, removeNumbers = false) {
@@ -553,7 +609,7 @@ function showToast(message, type = 'error', duration = 4000) {
 }
 
 function normalizeText(text) {
-    return text
+    return String(text ?? '')
         .normalize('NFKD')
         .replace(/[^\x00-\x7F]/g, '')
         .toLowerCase()
@@ -563,6 +619,49 @@ function normalizeText(text) {
         .replace(/\(.*?\)/g, '')
         .replace(/[!"£$%^&*()\-+=_@:;#~[\]{},.<>?/]/g, '')
         .replace(/\s+/g, '');
+}
+
+// Loose Unicode-aware comparison form used when the ASCII-only normalizeText() erases a title
+// entirely (e.g. titles written fully in Japanese, Korean, Cyrillic, ...).
+function normalizeTextUnicode(text) {
+    return String(text ?? '')
+        .normalize('NFKC')
+        .toLowerCase()
+        .replace(/\(.*?\)/g, '')
+        .replace(/[\p{P}\p{S}\s]/gu, '');
+}
+
+// Returns true/false for a guess, or null when the guess normalizes to nothing comparable
+// (pure punctuation/emoji) and should be rejected without consuming an attempt.
+function evaluateTitleGuess(rawGuess, rawTitle) {
+    const guess = String(rawGuess ?? '').trim();
+    const answerTitle = removeParentheses(String(rawTitle ?? '')).trim();
+    if (!guess) return null;
+
+    const normAnswer = normalizeText(answerTitle);
+    if (normAnswer) {
+        const normGuess = normalizeText(guess);
+        if (!normGuess) return null;
+        return normGuess === normAnswer;
+    }
+
+    // Answer has no ASCII content: fall back to a Unicode-aware comparison
+    const looseAnswer = normalizeTextUnicode(answerTitle);
+    if (looseAnswer) {
+        const looseGuess = normalizeTextUnicode(guess);
+        if (!looseGuess) return null;
+        return looseGuess === looseAnswer;
+    }
+    return guess.toLowerCase() === answerTitle.toLowerCase();
+}
+
+// Loose "contains" match that does not degrade to always-true when the needle has no ASCII letters
+function looseTextIncludes(haystack, needle) {
+    const normNeedle = normalizeText(needle);
+    if (normNeedle) return normalizeText(haystack).includes(normNeedle);
+    const looseNeedle = normalizeTextUnicode(needle);
+    if (!looseNeedle) return false;
+    return normalizeTextUnicode(haystack).includes(looseNeedle);
 }
 
 async function fakeTypePlaceholder(element, text, speed = 100) {
@@ -681,6 +780,11 @@ function fakeTypeValue(element, text, speed = 22) {
 
 // Game Functions
 function resetGame(preserveChallenge = false) {
+    // Invalidate any in-flight song load so its late response can't overwrite the new game
+    beginGameLoad();
+    typeSection = '';
+    processedWords = [];
+    selectedTrack = null;
     currentWordIndex = 0;
     startTime = null;
     endTime = null;
@@ -1038,8 +1142,10 @@ function isPreviewUrlFresh(previewUrl) {
 
 function applyTrackDetailsToActiveTrack(trackId, details) {
     if (!details) return;
+    // Ignore late responses for a track that is no longer active (prevents stale Year hints)
+    if (!selectedTrack || String(selectedTrack.id) !== String(trackId)) return;
     trackExtraDetails = details;
-    if (details.preview && selectedTrack && String(selectedTrack.id) === String(trackId)) {
+    if (details.preview) {
         selectedTrack.preview = details.preview;
         if (typeof document !== 'undefined') {
             const audioElement = document.getElementById('song-preview');
@@ -1060,7 +1166,9 @@ function hydrateSelectedTrackPreview() {
 }
 
 async function fetchTrackDetails(trackId) {
-    trackExtraDetails = null;
+    if (!selectedTrack || String(selectedTrack.id) === String(trackId)) {
+        trackExtraDetails = null;
+    }
     if (!trackId) return;
     const cacheKey = String(trackId);
     const cached = trackDetailsCache.get(cacheKey);
@@ -1243,14 +1351,20 @@ function updateHintsUI() {
 }
 
 async function playSnippet() {
-    if (isSnippetPlaying) {
+    if (isSnippetPlaying || isSnippetStarting) {
         stopSnippet();
         return;
     }
 
+    // Mark the start before any await so a second click toggles/cancels instead of spawning a second Audio
+    isSnippetStarting = true;
+    const sessionId = ++snippetSessionId;
+
     if (selectedTrack && !isPreviewUrlFresh(selectedTrack.preview) && selectedTrack.id) {
         await fetchTrackDetails(selectedTrack.id);
+        if (sessionId !== snippetSessionId) return; // stopped while refreshing the preview URL
     }
+    isSnippetStarting = false;
 
     if (!selectedTrack || !selectedTrack.preview) {
         showToast('Audio snippet preview unavailable for this track.', 'warning');
@@ -1260,9 +1374,14 @@ async function playSnippet() {
     if (snippetAudio) {
         snippetAudio.pause();
     }
+    if (snippetProgressAnim) {
+        clearInterval(snippetProgressAnim);
+        snippetProgressAnim = null;
+    }
 
-    snippetAudio = new Audio(selectedTrack.preview);
-    snippetAudio.volume = 0.35;
+    const audio = new Audio(selectedTrack.preview);
+    snippetAudio = audio;
+    audio.volume = 0.35;
     const allowedDuration = SNIPPET_DURATIONS[hintStage - 1];
 
     isSnippetPlaying = true;
@@ -1271,10 +1390,16 @@ async function playSnippet() {
     if (snippetLabel) snippetLabel.textContent = `Playing... (${allowedDuration}s)`;
     if (snippetBar) snippetBar.style.width = '0%';
 
-    snippetAudio.play().then(() => {
+    const isCurrentPlayback = () => snippetAudio === audio && isSnippetPlaying && sessionId === snippetSessionId;
+
+    audio.play().then(() => {
+        // stopSnippet() (or a newer playback) may have run before play() resolved
+        if (!isCurrentPlayback()) return;
+        if (snippetProgressAnim) clearInterval(snippetProgressAnim);
         snippetProgressAnim = setInterval(() => {
-            if (!snippetAudio || snippetAudio.paused) return;
-            const current = snippetAudio.currentTime;
+            if (!isCurrentPlayback()) return;
+            if (audio.paused) return;
+            const current = audio.currentTime;
             const pct = Math.min(100, (current / allowedDuration) * 100);
             if (snippetBar) snippetBar.style.width = pct + '%';
 
@@ -1284,13 +1409,17 @@ async function playSnippet() {
         }, 50);
     }).catch(err => {
         console.warn('Audio snippet playback blocked:', err);
-        stopSnippet();
+        if (isCurrentPlayback()) stopSnippet();
     });
 
-    snippetAudio.addEventListener('ended', stopSnippet, { once: true });
+    audio.addEventListener('ended', () => {
+        if (isCurrentPlayback()) stopSnippet();
+    }, { once: true });
 }
 
 function stopSnippet() {
+    snippetSessionId++;
+    isSnippetStarting = false;
     if (snippetAudio) {
         snippetAudio.pause();
         snippetAudio.currentTime = 0;
@@ -1314,7 +1443,9 @@ function handleGuess() {
     hideSuggestions();
 
     const rawGuess = guessInput.value.trim();
-    if (!rawGuess) {
+    const verdict = selectedTrack ? evaluateTitleGuess(rawGuess, selectedTrack.title) : null;
+    // Empty input, or input that normalizes to nothing (e.g. only punctuation): reject without using an attempt
+    if (!rawGuess || verdict === null) {
         if (guessInputContainer) {
             guessInputContainer.classList.remove('shake');
             void guessInputContainer.offsetWidth;
@@ -1325,14 +1456,9 @@ function handleGuess() {
         return;
     }
 
-    const userGuess = normalizeText(rawGuess);
-    const correctAnswerOriginal = selectedTrack.title;
-    const correctAnswerProcessed = removeParentheses(correctAnswerOriginal).trim();
-    const correctAnswer = normalizeText(correctAnswerProcessed);
-
     guessCount++;
 
-    if (userGuess === correctAnswer) {
+    if (verdict === true) {
         attemptHistory.push('correct');
         updateAttemptTracker();
         showFinalInfo();
@@ -1391,13 +1517,17 @@ function showSuggestions(list) {
 
     suggestionSelectedIndex = -1;
     guessSuggestions.innerHTML = list.map((item, idx) => `
-        <li class="guess-suggestion-item" data-index="${idx}" data-title="${escapeHtml(item.title)}">
+        <li class="guess-suggestion-item" id="guess-suggestion-${idx}" role="option" aria-selected="false" data-index="${idx}" data-title="${escapeHtml(item.title)}">
             <span class="item-title">${escapeHtml(item.title)}</span>
             <span class="item-artist">${escapeHtml(item.artist || '')}</span>
         </li>
     `).join('');
 
     guessSuggestions.style.display = 'block';
+    if (guessInput) {
+        guessInput.setAttribute('aria-expanded', 'true');
+        guessInput.removeAttribute('aria-activedescendant');
+    }
 
     guessSuggestions.querySelectorAll('.guess-suggestion-item').forEach(itemEl => {
         itemEl.addEventListener('click', () => {
@@ -1416,7 +1546,35 @@ function hideSuggestions() {
         guessSuggestions.style.display = 'none';
         guessSuggestions.innerHTML = '';
     }
+    if (guessInput) {
+        guessInput.setAttribute('aria-expanded', 'false');
+        guessInput.removeAttribute('aria-activedescendant');
+    }
     suggestionSelectedIndex = -1;
+}
+
+// Moves the highlighted guess suggestion; from "nothing selected" (-1), ArrowUp lands on the last item
+function getNextSuggestionIndex(currentIndex, count, direction) {
+    if (count <= 0) return -1;
+    if (direction > 0) return (currentIndex + 1) % count;
+    return currentIndex <= 0 ? count - 1 : currentIndex - 1;
+}
+
+function applySuggestionSelection(items) {
+    items.forEach((item, idx) => {
+        const isSelected = idx === suggestionSelectedIndex;
+        item.classList.toggle('selected', isSelected);
+        if (typeof item.setAttribute === 'function') item.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+    });
+    const active = items[suggestionSelectedIndex];
+    if (!guessInput) return;
+    if (active) {
+        guessInput.value = active.getAttribute('data-title');
+        const activeId = active.id || `guess-suggestion-${suggestionSelectedIndex}`;
+        guessInput.setAttribute('aria-activedescendant', activeId);
+    } else {
+        guessInput.removeAttribute('aria-activedescendant');
+    }
 }
 
 function filterAndShowSuggestions(query) {
@@ -2015,9 +2173,19 @@ function endGame() {
 
 // Event Listeners
 
+// The global Shift+Enter restart shortcut must not fire for keys typed into other text fields
+// (guess box, search box), which already handle Enter themselves.
+function isShiftEnterFromOtherField(event) {
+    const target = event && event.target;
+    if (!target || target === typingArea) return false;
+    const tag = typeof target.tagName === 'string' ? target.tagName.toUpperCase() : '';
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || Boolean(target.isContentEditable);
+}
+
 if (typeof document !== 'undefined') {
     document.addEventListener('keydown', (event) => {
         // Shift + Enter to restart the game
+        if (isShiftEnterFromOtherField(event)) return;
         if (event.key === 'Enter' && event.shiftKey && typingArea && typingArea.disabled) {
             event.preventDefault();
             if (startBtn) startBtn.click();  // Restart the game
@@ -2199,27 +2367,23 @@ if (guessInput) {
         if (event.key === 'ArrowDown') {
             if (items.length === 0) return;
             event.preventDefault();
-            suggestionSelectedIndex = (suggestionSelectedIndex + 1) % items.length;
-            items.forEach((item, idx) => item.classList.toggle('selected', idx === suggestionSelectedIndex));
-            if (items[suggestionSelectedIndex]) {
-                guessInput.value = items[suggestionSelectedIndex].getAttribute('data-title');
-            }
+            suggestionSelectedIndex = getNextSuggestionIndex(suggestionSelectedIndex, items.length, 1);
+            applySuggestionSelection(items);
             return;
         }
 
         if (event.key === 'ArrowUp') {
             if (items.length === 0) return;
             event.preventDefault();
-            suggestionSelectedIndex = (suggestionSelectedIndex - 1 + items.length) % items.length;
-            items.forEach((item, idx) => item.classList.toggle('selected', idx === suggestionSelectedIndex));
-            if (items[suggestionSelectedIndex]) {
-                guessInput.value = items[suggestionSelectedIndex].getAttribute('data-title');
-            }
+            suggestionSelectedIndex = getNextSuggestionIndex(suggestionSelectedIndex, items.length, -1);
+            applySuggestionSelection(items);
             return;
         }
 
         if (event.key === 'Enter') {
             event.preventDefault();
+            // Don't let Shift+Enter also bubble to the document-level "restart game" shortcut
+            if (typeof event.stopPropagation === 'function') event.stopPropagation();
             hideSuggestions();
             handleGuess();
             return;
@@ -2775,8 +2939,9 @@ if (startBtn) {
 
         if (!inputValue) {
             syncShelfVisibility('');
-            loadDefaultPlaylist();
+            // Reset first: resetGame() invalidates in-flight loads, so it must not run after the new load starts
             resetGame();
+            loadDefaultPlaylist();
             return;
         }
 
@@ -2921,8 +3086,21 @@ function parseChallengeParams(queryString) {
     return result;
 }
 
+// Legacy challenge links carry artist + title text: prefer a result matching both, then title only, then the top hit
+function findChallengeTrackMatch(tracks, artistName, trackTitle) {
+    const list = Array.isArray(tracks) ? tracks.filter(Boolean) : [];
+    if (list.length === 0) return null;
+    if (!trackTitle) return list[0];
+    const titleMatches = (t) => looseTextIncludes(t.title || '', trackTitle);
+    const artistMatches = (t) => !artistName || looseTextIncludes(getTrackArtistName(t), artistName);
+    return list.find(t => titleMatches(t) && artistMatches(t))
+        || list.find(titleMatches)
+        || list[0];
+}
+
 async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = null, options = null) {
     resetGame(true);
+    const loadToken = beginGameLoad();
     isSharedGame = true;
     currentGameMode = 'song';
 
@@ -2955,39 +3133,34 @@ async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = nu
     try {
         const normalizedSearchQuery = String(searchQuery || '').trim().toLowerCase();
         const response = await apiFetch(`/tracks?artist=${encodeURIComponent(normalizedSearchQuery)}`);
+        if (isLoadStale(loadToken)) return;
         if (!response.ok) throw new Error('Failed to find track on Deezer.');
         const data = await response.json();
-        if (!data.data || data.data.length === 0) {
+        if (isLoadStale(loadToken)) return;
+        const results = data && Array.isArray(data.data) ? data.data.filter(t => t && t.title) : [];
+        if (results.length === 0) {
             throw new Error(`Track not found: ${searchQuery}`);
         }
 
-        let match = data.data[0];
-        if (trackTitle && artistName) {
-            const normTitle = normalizeText(trackTitle);
-            const normArtist = normalizeText(artistName);
-            const exact = data.data.find(t => 
-                normalizeText(t.title).includes(normTitle) ||
-                (t.artist && normalizeText(t.artist.name).includes(normArtist))
-            );
-            if (exact) match = exact;
-        }
+        const match = findChallengeTrackMatch(results, artistName, trackTitle);
 
         selectedTrack = match;
         hydrateSelectedTrackPreview();
-        const lyricsArtist = (match.artist && match.artist.name) || artistName || '';
+        const lyricsArtist = getTrackArtistName(match) || artistName || '';
         const lyricsTrack = match.title || trackTitle || '';
 
         updateChallengeBanner();
 
         const lyrics = await fetchLyrics(lyricsArtist, lyricsTrack);
-        cachedSongLyrics[`${lyricsArtist}-${lyricsTrack}`.toLowerCase()] = { lyrics, track: match };
+        if (isLoadStale(loadToken)) return;
+        cacheLyrics(getLyricsCacheKey(lyricsArtist, lyricsTrack), lyrics, match);
 
-        typeSection = extractRandomSection(lyrics, 150, 300, targetStartIndex);
-        updateDisplayedText();
-        if (endGameBtn) endGameBtn.style.display = 'inline-block';
+        if (!applyLoadedSong(match, lyrics, targetStartIndex)) {
+            throw new Error(`No typeable lyrics for: ${lyricsTrack}`);
+        }
     } catch (error) {
+        if (isLoadStale(loadToken)) return;
         console.error('Error loading shared challenge:', error);
-        stopLoadingBar();
         if (challengeBanner) {
             challengeBanner.style.display = 'flex';
             challengeBanner.innerHTML = `⚠️ Could not load challenge for "<strong>${escapeHtml(trackTitle)}</strong>". <button id="challenge-fallback-btn" style="margin-left:8px;padding:4px 8px;cursor:pointer;background:#333;color:#fff;border:1px solid #555;border-radius:4px;">Play random song</button>`;
@@ -3012,6 +3185,7 @@ async function loadSharedChallenge(artistName, trackTitle, targetStartIndex = nu
 
 async function loadSharedChallengeByTrackId(trackId, targetStartIndex = null, options = null) {
     resetGame(true);
+    const loadToken = beginGameLoad();
     isSharedGame = true;
     currentGameMode = 'song';
 
@@ -3039,8 +3213,10 @@ async function loadSharedChallengeByTrackId(trackId, targetStartIndex = null, op
 
     try {
         const response = await apiFetch(`/track-details?trackId=${encodeURIComponent(trackId)}`);
+        if (isLoadStale(loadToken)) return;
         if (!response.ok) throw new Error('Failed to find track on Deezer.');
         const trackDetails = await response.json();
+        if (isLoadStale(loadToken)) return;
         if (!trackDetails || !trackDetails.id || !trackDetails.title) {
             throw new Error(`Track not found: ${trackId}`);
         }
@@ -3059,14 +3235,15 @@ async function loadSharedChallengeByTrackId(trackId, targetStartIndex = null, op
         updateChallengeBanner();
 
         const lyrics = await fetchLyrics(lyricsArtist, lyricsTrack);
-        cachedSongLyrics[`${lyricsArtist}-${lyricsTrack}`.toLowerCase()] = { lyrics, track: trackDetails };
+        if (isLoadStale(loadToken)) return;
+        cacheLyrics(getLyricsCacheKey(lyricsArtist, lyricsTrack), lyrics, trackDetails);
 
-        typeSection = extractRandomSection(lyrics, 150, 300, targetStartIndex);
-        updateDisplayedText();
-        if (endGameBtn) endGameBtn.style.display = 'inline-block';
+        if (!applyLoadedSong(trackDetails, lyrics, targetStartIndex)) {
+            throw new Error(`No typeable lyrics for: ${lyricsTrack}`);
+        }
     } catch (error) {
+        if (isLoadStale(loadToken)) return;
         console.error('Error loading shared challenge by track ID:', error);
-        stopLoadingBar();
         if (challengeBanner) {
             challengeBanner.style.display = 'flex';
             challengeBanner.innerHTML = `⚠️ Could not load challenge for track ID <strong>${escapeHtml(trackId)}</strong>. <button id="challenge-fallback-btn" style="margin-left:8px;padding:4px 8px;cursor:pointer;background:#333;color:#fff;border:1px solid #555;border-radius:4px;">Play random song</button>`;
@@ -3140,8 +3317,14 @@ async function parseAndLoadUrlParameters() {
         } else if (parsed.artist) {
             if (artistInput) artistInput.value = parsed.artist;
             syncArtistClearButton();
-            await handleArtistSearch(parsed.artist);
-            return true;
+            try {
+                await handleArtistSearch(parsed.artist);
+                return true;
+            } catch (err) {
+                console.warn(`Could not load artist "${parsed.artist}" from URL, falling back to default playlist:`, err);
+                showToast(err && err.message ? err.message : 'Could not load that artist.', 'error');
+                return false;
+            }
         }
     }
 
@@ -3267,46 +3450,56 @@ if (typeof window !== 'undefined') {
 
 // Button Logic
 async function handleArtistSearch(artistName, knownArtistId = null) {
+    const loadToken = beginGameLoad();
     currentGameMode = 'artist';
+    let tracksForArtist = artistTracks;
     if (artistName === previousArtist && artistTracks.length > 0) {
         console.log(`Using cached tracks for artist: ${artistName}`);
     } else {
         console.log(`Fetching tracks for new artist: ${artistName}`);
 
         const artistId = knownArtistId || await fetchArtistId(artistName);
+        if (isLoadStale(loadToken)) return;
         if (!artistId) throw new Error('Artist not found.');
 
-        artistTracks = await fetchTopTracks(artistId, 100);
-        if (artistTracks.length === 0) throw new Error('No top tracks found.');
+        const fetchedTracks = await fetchTopTracks(artistId, 100);
+        if (isLoadStale(loadToken)) return;
+        tracksForArtist = Array.isArray(fetchedTracks) ? fetchedTracks : [];
+        if (tracksForArtist.length === 0) throw new Error('No top tracks found.');
 
+        artistTracks = tracksForArtist;
         artistCandidateCache[`id:${artistId}`] = artistTracks;
         // Update the cached artist
         previousArtist = artistName;
     }
 
-    renderArtistPopularTracksShelf(artistName, artistTracks);
-    await tryFetchLyricsFromTracks(artistTracks);
+    renderArtistPopularTracksShelf(artistName, tracksForArtist);
+    const loaded = await tryFetchLyricsFromTracks(tracksForArtist, loadToken);
+    if (!loaded || isLoadStale(loadToken)) return;
     ensureSelectedArtistCandidates();
     syncShelfVisibility(artistName, selectedTrack ? selectedTrack.title : '');
 }
 
 async function handleSongSearch(songName, preferredArtist = '', preferredTitle = '') {
+    const loadToken = beginGameLoad();
     currentGameMode = 'song';
-    const cacheKey = songName.toLowerCase().trim();
+    const queryCacheKey = (preferredArtist && preferredTitle)
+        ? getLyricsCacheKey(preferredArtist, preferredTitle)
+        : getLyricsCacheKey('', songName);
+    const notTypeableError = () => new Error(`Lyrics for "${songName}" can't be typed (unsupported script). Try another track or artist.`);
 
-    if (cachedSongLyrics[cacheKey]) {
+    const cachedEntry = getCachedLyrics(queryCacheKey);
+    if (cachedEntry && cachedEntry.track) {
         console.log(`Using cached lyrics for: ${songName}`);
-        const cachedEntry = cachedSongLyrics[cacheKey];
-        const lyricsText = typeof cachedEntry === 'string' ? cachedEntry : cachedEntry.lyrics;
-        if (cachedEntry && typeof cachedEntry === 'object' && cachedEntry.track) {
-            selectedTrack = cachedEntry.track;
-            hydrateSelectedTrackPreview();
-        }
-        typeSection = extractRandomSection(lyricsText);
-        updateDisplayedText();
-        if (endGameBtn) endGameBtn.style.display = 'inline-block';
-        return; 
+        if (!applyLoadedSong(cachedEntry.track, cachedEntry.lyrics)) throw notTypeableError();
+        return;
     }
+
+    // Stores lyrics under the resolved track's key and the query key so both lookups hit later
+    const rememberLyrics = (track, lyrics) => {
+        cacheLyrics(getLyricsCacheKey(getTrackArtistName(track), track.title), lyrics, track);
+        cacheLyrics(queryCacheKey, lyrics, track);
+    };
 
     // Zero-API optimization: reuse track metadata if already loaded in artistTracks
     if (preferredTitle && Array.isArray(artistTracks) && artistTracks.length > 0) {
@@ -3314,96 +3507,95 @@ async function handleSongSearch(songName, preferredArtist = '', preferredTitle =
         const targetArtistNorm = preferredArtist ? normOmnibox(preferredArtist) : '';
         const inMemoryTrack = artistTracks.find(t =>
             t &&
+            t.title &&
             (normOmnibox(t.title_short || t.title) === targetTitleNorm || normOmnibox(t.title) === targetTitleNorm) &&
             (!targetArtistNorm || (t.artist && normOmnibox(t.artist.name) === targetArtistNorm))
         );
-        if (inMemoryTrack) {
-            const trackArtist = inMemoryTrack.artist.name;
-            const trackTitle = inMemoryTrack.title;
-            const lyrics = await fetchLyrics(trackArtist, trackTitle);
-            cachedSongLyrics[cacheKey] = { lyrics, track: inMemoryTrack };
-            selectedTrack = inMemoryTrack;
-            hydrateSelectedTrackPreview();
-            typeSection = extractRandomSection(lyrics);
-            updateDisplayedText();
-            if (endGameBtn) endGameBtn.style.display = 'inline-block';
+        if (inMemoryTrack && getTrackArtistName(inMemoryTrack)) {
+            const lyrics = await fetchLyrics(getTrackArtistName(inMemoryTrack), inMemoryTrack.title);
+            if (isLoadStale(loadToken)) return;
+            rememberLyrics(inMemoryTrack, lyrics);
+            if (!applyLoadedSong(inMemoryTrack, lyrics)) throw notTypeableError();
             return;
         }
     }
 
     console.log(`Fetching lyrics for new song: ${songName}`);
 
+    let topSearchResult = null;
+    let lyrics = null;
     try {
         const normalizedQuery = songName.trim().toLowerCase();
         const response = await apiFetch(`/tracks?artist=${encodeURIComponent(normalizedQuery)}`);
+        if (isLoadStale(loadToken)) return;
         const data = await response.json();
+        if (isLoadStale(loadToken)) return;
 
-        if (!data.data || data.data.length === 0) throw new Error('No matching tracks found for the song.');
+        const results = data && Array.isArray(data.data)
+            ? data.data.filter(t => t && t.title && getTrackArtistName(t))
+            : [];
+        if (results.length === 0) throw new Error('No matching tracks found for the song.');
 
-        let topSearchResult = data.data.find(t => !isUnwantedTrack(t)) || data.data[0];
+        topSearchResult = results.find(t => !isUnwantedTrack(t)) || results[0];
         if (preferredArtist && preferredTitle) {
             const pArtistNorm = normOmnibox(preferredArtist);
             const pTitleNorm = normOmnibox(preferredTitle);
-            const exact = data.data.find(t =>
-                !isUnwantedTrack(t) &&
-                t.artist &&
-                normOmnibox(t.artist.name) === pArtistNorm &&
-                (normOmnibox(t.title_short || t.title) === pTitleNorm || normOmnibox(t.title).includes(pTitleNorm))
-            ) || data.data.find(t =>
-                t.artist &&
-                normOmnibox(t.artist.name) === pArtistNorm &&
-                (normOmnibox(t.title_short || t.title) === pTitleNorm || normOmnibox(t.title).includes(pTitleNorm))
-            );
+            const matchesPreferred = (t) =>
+                normOmnibox(getTrackArtistName(t)) === pArtistNorm &&
+                (normOmnibox(t.title_short || t.title) === pTitleNorm || normOmnibox(t.title).includes(pTitleNorm));
+            const exact = results.find(t => !isUnwantedTrack(t) && matchesPreferred(t)) || results.find(matchesPreferred);
             if (exact) topSearchResult = exact;
         }
 
-        const trackArtist = topSearchResult.artist.name;
+        const trackArtist = getTrackArtistName(topSearchResult);
         const trackTitle = topSearchResult.title;
 
         console.log(`Top result: ${trackTitle} by ${trackArtist}`);
 
-        const lyrics = await fetchLyrics(trackArtist, trackTitle);
-        cachedSongLyrics[cacheKey] = { lyrics, track: topSearchResult };
-
-        selectedTrack = topSearchResult;
-        hydrateSelectedTrackPreview();
-
-        typeSection = extractRandomSection(lyrics);
-        updateDisplayedText();
-        endGameBtn.style.display = 'inline-block';
+        lyrics = await fetchLyrics(trackArtist, trackTitle);
+        if (isLoadStale(loadToken)) return;
     } catch (error) {
+        if (isLoadStale(loadToken)) return;
         throw new Error(`Lyrics not found for "${songName}". Try another track or artist.`);
     }
+
+    rememberLyrics(topSearchResult, lyrics);
+    if (!applyLoadedSong(topSearchResult, lyrics)) throw notTypeableError();
 }
 
-async function tryFetchLyricsFromTracks(tracks) {
+// Tries random tracks until one has typeable lyrics. Returns true when a song was loaded,
+// false if the load was superseded by a newer one; throws if no track works.
+async function tryFetchLyricsFromTracks(tracks, loadToken = gameLoadToken) {
+    const list = Array.isArray(tracks) ? tracks : [];
     const triedTracks = new Set();
-    let lyrics = null;
 
-    while (!lyrics && triedTracks.size < tracks.length) {
-        
-        const randomIndex = Math.floor(Math.random() * tracks.length);
+    while (triedTracks.size < list.length) {
+        const randomIndex = Math.floor(Math.random() * list.length);
         if (triedTracks.has(randomIndex)) continue;
 
         triedTracks.add(randomIndex);
-        const track = tracks[randomIndex];
-        console.log(`Trying track: {track.title} by ${track.artist.name}`);
+        const track = list[randomIndex];
+        const trackArtist = getTrackArtistName(track);
+        const trackTitle = track && track.title;
+        if (!trackArtist || !trackTitle) continue; // malformed track entry
+
+        console.log(`Trying track: ${trackTitle} by ${trackArtist}`);
+        let lyrics;
         try {
-            lyrics = await fetchLyrics(track.artist.name, track.title);
-            selectedTrack = tracks[randomIndex];
-            hydrateSelectedTrackPreview();
+            lyrics = await fetchLyrics(trackArtist, trackTitle);
         } catch (error) {
-            console.warn(`Lyrics not found for track: ${track.title}`);
+            if (isLoadStale(loadToken)) return false;
+            console.warn(`Lyrics not found for track: ${trackTitle}`);
+            continue;
         }
+        if (isLoadStale(loadToken)) return false;
+
+        cacheLyrics(getLyricsCacheKey(trackArtist, trackTitle), lyrics, track);
+        if (applyLoadedSong(track, lyrics)) return true;
+        console.warn(`No typeable lyrics for track: ${trackTitle}`);
     }
 
-    if (!lyrics) {
-        throw new Error('Failed to fetch lyrics for any track.');
-    }
-
-    typeSection = extractRandomSection(lyrics);
-    updateDisplayedText();
-    if (endGameBtn) endGameBtn.style.display = 'inline-block';
+    throw new Error('Failed to fetch lyrics for any track.');
 }
 
 // Loading Bar
@@ -3526,7 +3718,18 @@ if (typeof module !== 'undefined' && module.exports) {
         handleSongSearch,
         ensureSelectedArtistCandidates,
         playSnippet,
+        stopSnippet,
         showFinalInfo,
+        evaluateTitleGuess,
+        findChallengeTrackMatch,
+        getLyricsCacheKey,
+        getNextSuggestionIndex,
+        isShiftEnterFromOtherField,
+        pickTypeableSection,
+        tryFetchLyricsFromTracks,
+        applyTrackDetailsToActiveTrack,
+        showSuggestions,
+        hideSuggestions,
         isMobileInputMode,
         sanitizeRawTypingValue,
         adaptTypedCaseForMobile,
@@ -3542,6 +3745,11 @@ if (typeof module !== 'undefined' && module.exports) {
         UNWANTED_ARTIST_PATTERNS,
         UNWANTED_TITLE_PATTERNS,
         _getState: () => ({
+            typeSection,
+            gameLoadToken,
+            isSnippetPlaying,
+            isSnippetStarting,
+            snippetAudio,
             totalKeystrokes,
             errorKeystrokes,
             previousRawTyped,
@@ -3582,6 +3790,7 @@ if (typeof module !== 'undefined' && module.exports) {
             sectionTwo
         }),
         _setState: (state) => {
+            if ('typeSection' in state) typeSection = state.typeSection;
             if ('totalKeystrokes' in state) totalKeystrokes = state.totalKeystrokes;
             if ('errorKeystrokes' in state) errorKeystrokes = state.errorKeystrokes;
             if ('previousRawTyped' in state) previousRawTyped = state.previousRawTyped;
