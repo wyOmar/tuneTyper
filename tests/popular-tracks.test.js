@@ -333,7 +333,13 @@ test('Popular tracks search-bar typing effect & Go replay behavior', async (t) =
         scriptModule.bindArtistTrackCards(2);
 
         await cruelSummerCard.click();
-        await new Promise((r) => setTimeout(r, 120));
+        // Poll until the fake-typing animation finishes instead of a fixed wait:
+        // coarse timer resolution (e.g. ~15ms on Windows) makes per-char delays
+        // much longer than nominal.
+        const typingDeadline = Date.now() + 3000;
+        while (artistInput.value !== 'Taylor Swift - Cruel Summer' && Date.now() < typingDeadline) {
+            await new Promise((r) => setTimeout(r, 10));
+        }
 
         assert.equal(artistInput.value, 'Taylor Swift - Cruel Summer');
         assert.equal(cruelSummerCard.classList.contains('active'), true);
