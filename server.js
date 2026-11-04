@@ -1,6 +1,5 @@
 const express = require('express');
 const axios = require('axios');
-const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const {
@@ -45,12 +44,51 @@ const {
 const UK_TOP_40_PLAYLIST_ID = '2868476282';
 
 const app = express();
-const PORT = 3000;
-app.use(cors());
+const PORT = process.env.PORT || 3000;
+// No global CORS: the game client is same-origin and uses relative URLs.
 
 const publicDir = path.join(__dirname, 'public');
 const indexHtmlPath = path.join(publicDir, 'index.html');
 const baseIndexHtml = fs.readFileSync(indexHtmlPath, 'utf-8');
+
+const NUMERIC_ID_RE = /^\d+$/;
+function isNumericId(value) {
+    return typeof value === 'string' && NUMERIC_ID_RE.test(value);
+}
+
+// Map Deezer API error payloads to HTTP status codes (code 4 = quota exceeded, 800 = no data)
+function deezerErrorStatus(error, notFoundStatus = 502) {
+    if (!error) return 502;
+    if (error.code === 4) return 429;
+    if (error.code === 800 || error.type === 'DataException') return notFoundStatus;
+    return 502;
+}
+
+// Cron runs under a 60s Vercel maxDuration; stop starting new work well before that
+const WARM_TIME_BUDGET_MS = 45 * 1000;
+
+// Small dedicated in-memory cache for rendered OG PNGs (kept out of the shared data LRU)
+const OG_PNG_MAX_ENTRIES = 20;
+const OG_IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, s-maxage=31536000, immutable';
+const ogPngCache = new Map();
+function getOgPng(key) {
+    const entry = ogPngCache.get(key);
+    if (!entry) return undefined;
+    if (Date.now() > entry.expiresAt) {
+        ogPngCache.delete(key);
+        return undefined;
+    }
+    ogPngCache.delete(key);
+    ogPngCache.set(key, entry);
+    return entry.value;
+}
+function setOgPng(key, value, ttlSeconds) {
+    ogPngCache.delete(key);
+    while (ogPngCache.size >= OG_PNG_MAX_ENTRIES) {
+        ogPngCache.delete(ogPngCache.keys().next().value);
+    }
+    ogPngCache.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
+}
 
 // Helper: run async tasks with bounded concurrency
 async function mapWithConcurrency(items, concurrency, worker) {
@@ -95,7 +133,7 @@ async function queryOvhSingle(artist, trackTitle) {
 
 /**
  * Read-through lyrics resolver:
- * - 7-day rolling Redis cache on hit (automatically refreshed upon re-play or re-warm)
+ * - 7-day Redis cache from when lyrics are first fetched (hits do not extend the TTL)
  * - 24h negative cache on genuine 404 / empty lyrics so missing songs don't hammer lyrics.ovh
  * - Automatic stripped-title retry when Deezer titles include "(feat. ...)" / "- Radio Edit"
  */
@@ -132,10 +170,12 @@ async function fetchAndCacheLyrics(artist, track, cache = defaultCache) {
                 const altCached = await cache.get(altKey);
                 if (altCached && typeof altCached.lyrics === 'string' && altCached.lyrics.trim()) {
                     lookup = { found: true, lyrics: altCached.lyrics };
-                } else {
+                } else if (!(altCached && altCached.notFound)) {
                     lookup = await queryOvhSingle(artist, stripped);
                     if (lookup.found) {
                         usedFallbackKey = altKey;
+                    } else {
+                        await cache.set(altKey, { notFound: true }, TTL.LYRICS_MISS_SECONDS);
                     }
                 }
             }
@@ -143,7 +183,7 @@ async function fetchAndCacheLyrics(artist, track, cache = defaultCache) {
 
         if (lookup.found) {
             const payload = { lyrics: lookup.lyrics };
-            await cache.set(primaryKey, payload, TTL.LYRICS_SECONDS); // 7-day rolling cache in Redis
+            await cache.set(primaryKey, payload, TTL.LYRICS_SECONDS); // 7-day cache in Redis
             if (usedFallbackKey && usedFallbackKey !== primaryKey) {
                 await cache.set(usedFallbackKey, payload, TTL.LYRICS_SECONDS);
             }
@@ -161,6 +201,8 @@ async function fetchAndCacheLyrics(artist, track, cache = defaultCache) {
 async function warmSinglePlaylist(playlistId, options = {}) {
     const cache = options.cache || defaultCache;
     const concurrency = options.concurrency || 5;
+    const deadline = options.deadline || (Date.now() + WARM_TIME_BUDGET_MS);
+    let timedOut = false;
 
     const playlistRes = await axios.get(
         `https://api.deezer.com/playlist/${encodeURIComponent(playlistId)}`,
@@ -188,10 +230,15 @@ async function warmSinglePlaylist(playlistId, options = {}) {
     await mapWithConcurrency(sanitizedTracks, concurrency, async (track, idx) => {
         const existing = existingEntries[idx];
         if (existing && typeof existing.lyrics === 'string' && existing.lyrics.trim()) {
-            playableTracks[idx] = { ...track, lyrics: existing.lyrics };
+            // Manifest stores track metadata only; lyrics stay in their own per-song keys
+            playableTracks[idx] = track;
             return;
         }
         if (existing && existing.notFound && !options.forceRecheckMissing) {
+            return;
+        }
+        if (Date.now() >= deadline) {
+            timedOut = true;
             return;
         }
 
@@ -199,7 +246,7 @@ async function warmSinglePlaylist(playlistId, options = {}) {
             const result = await fetchAndCacheLyrics(track.artist.name, track.title, cache);
             if (result.lyrics) {
                 if (!result.cached) newlyFetchedLyrics++;
-                playableTracks[idx] = { ...track, lyrics: result.lyrics };
+                playableTracks[idx] = track;
             }
         } catch (err) {
             console.warn(`Warm skip for "${track.title}" by ${track.artist.name}:`, err.message);
@@ -227,6 +274,7 @@ async function warmSinglePlaylist(playlistId, options = {}) {
         total: sanitizedTracks.length,
         playable: verified.length,
         newlyFetchedLyrics,
+        timedOut,
         updatedAt
     };
 }
@@ -241,12 +289,19 @@ async function warmCuratedPlaylistsCache(options = {}) {
         ? options.playlistIds
         : (options.playlistId ? [options.playlistId] : [DEFAULT_PLAYLIST_ID, UK_TOP_40_PLAYLIST_ID]);
 
+    const deadline = options.deadline || (Date.now() + WARM_TIME_BUDGET_MS);
     const playlistSummaries = [];
     let totalNewlyFetchedLyrics = 0;
+    let timedOut = false;
 
     for (const id of playlistIds) {
+        if (Date.now() >= deadline) {
+            timedOut = true;
+            break;
+        }
         try {
-            const res = await warmSinglePlaylist(id, { ...options, cache, concurrency });
+            const res = await warmSinglePlaylist(id, { ...options, cache, concurrency, deadline });
+            if (res.timedOut) timedOut = true;
             playlistSummaries.push(res);
             totalNewlyFetchedLyrics += res.newlyFetchedLyrics;
         } catch (err) {
@@ -257,7 +312,7 @@ async function warmCuratedPlaylistsCache(options = {}) {
     // Progressively pre-warm curated SEO artist tracks (up to featuredBatchLimit uncached songs per run)
     let featuredWarmed = 0;
     const featuredBatchLimit = options.featuredBatchLimit !== undefined ? options.featuredBatchLimit : 30;
-    if (featuredBatchLimit > 0 && Array.isArray(FEATURED_ARTISTS)) {
+    if (featuredBatchLimit > 0 && Array.isArray(FEATURED_ARTISTS) && Date.now() < deadline) {
         const allFeaturedPairs = [];
         for (const artist of FEATURED_ARTISTS) {
             if (!artist || !Array.isArray(artist.tracks)) continue;
@@ -273,6 +328,10 @@ async function warmCuratedPlaylistsCache(options = {}) {
         const uncachedFeatured = allFeaturedPairs.filter((_, i) => !existingFeatured[i]).slice(0, featuredBatchLimit);
 
         await mapWithConcurrency(uncachedFeatured, concurrency, async (pair) => {
+            if (Date.now() >= deadline) {
+                timedOut = true;
+                return;
+            }
             try {
                 const res = await fetchAndCacheLyrics(pair.artist, pair.title, cache);
                 if (res.lyrics && !res.cached) featuredWarmed++;
@@ -293,6 +352,7 @@ async function warmCuratedPlaylistsCache(options = {}) {
         playlists: playlistSummaries,
         newlyFetchedLyrics: totalNewlyFetchedLyrics,
         featuredWarmed,
+        timedOut,
         updatedAt: new Date().toISOString()
     };
 }
@@ -322,7 +382,10 @@ app.use(express.static(publicDir, {
         if (filePath.endsWith('.html')) {
             res.setHeader('Cache-Control', 'public, max-age=0, s-maxage=86400, stale-while-revalidate=604800');
             res.setHeader('Vary', 'Accept-Encoding');
-        } else if (filePath.match(/\.(css|js|png|jpg|jpeg|gif|ico|svg|woff2?|webmanifest)$/)) {
+        } else if (/\.(css|js)$/.test(filePath)) {
+            // Unversioned script/style URLs: always revalidate (ETag) so deploys take effect immediately
+            res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+        } else if (filePath.match(/\.(png|jpg|jpeg|gif|ico|svg|woff2?|webmanifest)$/)) {
             res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400');
         }
     }
@@ -362,7 +425,7 @@ app.get('/', async (req, res) => {
                 };
             } else if (!trackDetails && directArtist && directTrack) {
                 trackDetails = {
-                    id: directTrackId || null,
+                    id: isNumericId(directTrackId) ? directTrackId : null,
                     title: directTrack,
                     artist: { name: directArtist }
                 };
@@ -428,6 +491,15 @@ app.get('/api/cron/warm-cache', async (req, res) => {
  * - Cross-origin hotlinking from unauthorized external domains is rejected.
  * - Requires in-app request header (X-Requested-With: TuneTyper) to prevent external scraping.
  */
+function isLocalDevHost(hostWithPort) {
+    try {
+        const hostname = new URL(`http://${hostWithPort}`).hostname;
+        return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+    } catch (_) {
+        return false;
+    }
+}
+
 function requireGameClient(req, res, next) {
     const fetchDest = req.headers['sec-fetch-dest'];
     const fetchMode = req.headers['sec-fetch-mode'];
@@ -446,7 +518,7 @@ function requireGameClient(req, res, next) {
     if (origin) {
         try {
             const originHost = new URL(origin).host;
-            if (host && originHost !== host && !originHost.includes('localhost') && !originHost.includes('127.0.0.1')) {
+            if (host && originHost !== host && !isLocalDevHost(originHost)) {
                 return res.status(403).json({ error: 'Forbidden: cross-origin API access is disabled.' });
             }
         } catch (_) {}
@@ -455,7 +527,7 @@ function requireGameClient(req, res, next) {
     if (referer) {
         try {
             const refererHost = new URL(referer).host;
-            if (host && refererHost !== host && !refererHost.includes('localhost') && !refererHost.includes('127.0.0.1')) {
+            if (host && refererHost !== host && !isLocalDevHost(refererHost)) {
                 return res.status(403).json({ error: 'Forbidden: unauthorized referer.' });
             }
         } catch (_) {}
@@ -612,6 +684,7 @@ app.get('/suggest', requireGameClient, async (req, res) => {
 app.get('/top-tracks', requireGameClient, async (req, res) => {
     const artistId = typeof req.query.artistId === 'string' ? req.query.artistId.trim() : '';
     if (!artistId) return res.status(400).send('Artist ID is required.');
+    if (!isNumericId(artistId)) return res.status(400).send('Artist ID must be numeric.');
     const parsedLimit = parseInt(req.query.limit, 10);
     const limit = (!isNaN(parsedLimit) && parsedLimit > 0) ? Math.min(100, parsedLimit) : 50;
 
@@ -721,8 +794,15 @@ app.get('/playlists', requireGameClient, (req, res) => {
 // Curated Playlist Default Pool (serves 24/7 pre-warmed verified OVH tracks when available)
 app.get('/default', requireGameClient, async (req, res) => {
     try {
-        const queryId = req.query.id || req.query.playlist;
+        const rawQueryId = req.query.id || req.query.playlist;
+        const queryId = typeof rawQueryId === 'string' ? rawQueryId.trim() : '';
+        if (rawQueryId !== undefined && !queryId) {
+            return res.status(400).send('Playlist ID must be numeric.');
+        }
         const target = queryId ? getCuratedPlaylist(queryId) : getDefaultPlaylist();
+        if (queryId && !target && !isNumericId(queryId)) {
+            return res.status(400).send('Playlist ID must be numeric.');
+        }
         const playlistId = target ? target.id : (queryId || DEFAULT_PLAYLIST_ID);
 
         const result = await getPlaylistTracks(playlistId);
@@ -743,7 +823,7 @@ app.get('/default', requireGameClient, async (req, res) => {
     } catch (error) {
         console.error('Error fetching tracks:', error.message);
         res.setHeader('Cache-Control', 'no-store');
-        res.status(500).send('Failed to fetch tracks.');
+        res.status(error.statusCode || 500).send('Failed to fetch tracks.');
     }
 });
 
@@ -751,6 +831,9 @@ app.get('/default', requireGameClient, async (req, res) => {
 app.get('/playlist/:id', requireGameClient, async (req, res) => {
     try {
         const target = getCuratedPlaylist(req.params.id);
+        if (!target && !isNumericId(req.params.id)) {
+            return res.status(400).send('Playlist ID must be numeric.');
+        }
         const playlistId = target ? target.id : req.params.id;
 
         const result = await getPlaylistTracks(playlistId);
@@ -771,7 +854,7 @@ app.get('/playlist/:id', requireGameClient, async (req, res) => {
     } catch (error) {
         console.error('Error fetching playlist:', error.message);
         res.setHeader('Cache-Control', 'no-store');
-        res.status(500).send('Failed to fetch playlist.');
+        res.status(error.statusCode || 500).send('Failed to fetch playlist.');
     }
 });
 
@@ -788,7 +871,7 @@ async function fetchTrackDetails(trackId) {
             );
             if (response.data.error || !response.data.id) {
                 const err = new Error(response.data.error ? response.data.error.message : 'Track not found');
-                err.statusCode = 404;
+                err.statusCode = response.data.error ? deezerErrorStatus(response.data.error, 404) : 404;
                 throw err;
             }
             const data = {
@@ -826,6 +909,7 @@ async function fetchTrackDetails(trackId) {
 app.get('/track-details', requireGameClient, async (req, res) => {
     const trackId = typeof req.query.trackId === 'string' ? req.query.trackId.trim() : '';
     if (!trackId) return res.status(400).send('Track ID is required.');
+    if (!isNumericId(trackId)) return res.status(400).send('Track ID must be numeric.');
 
     try {
         const { payload, cacheHit } = await fetchTrackDetails(trackId);
@@ -853,11 +937,11 @@ app.get(['/api/og/track', '/og/track/:id.png'], async (req, res) => {
     const cacheKey = ogSongImageCacheKey(trackId);
 
     try {
-        // Return cached PNG if already rendered in L1 memory
-        const cachedPng = await defaultCache.get(cacheKey, { skipRedis: true });
+        // Return cached PNG if already rendered in this instance's dedicated OG image cache
+        const cachedPng = getOgPng(cacheKey);
         if (cachedPng && Buffer.isBuffer(cachedPng)) {
             res.setHeader('Content-Type', 'image/png');
-            res.setHeader('Cache-Control', 'public, max-age=31536000, s-maxage=31536000, immutable');
+            res.setHeader('Cache-Control', OG_IMMUTABLE_CACHE_CONTROL);
             res.setHeader('X-Cache', 'HIT');
             return res.send(cachedPng);
         }
@@ -868,14 +952,18 @@ app.get(['/api/og/track', '/og/track/:id.png'], async (req, res) => {
         const albumTitle = track.album ? track.album.title : '';
         const coverUrl = track.album ? (track.album.cover_big || track.album.cover_medium) : '';
 
-        // Fetch lyrics if available
+        // Fetch lyrics if available. A thrown lookup (timeout / upstream outage) is a degraded
+        // render, unlike a genuine not-found, so it must not be cached as immutable.
         let lyrics = null;
+        let degraded = !coverUrl;
         try {
             const lyricsResult = await fetchAndCacheLyrics(artistName, trackTitle, defaultCache);
             if (lyricsResult && lyricsResult.lyrics) {
                 lyrics = lyricsResult.lyrics;
             }
-        } catch (_) {}
+        } catch (_) {
+            degraded = true;
+        }
 
         const { pngBuffer } = await generateSongOgImage({
             track: trackTitle,
@@ -885,12 +973,16 @@ app.get(['/api/og/track', '/og/track/:id.png'], async (req, res) => {
             lyrics
         });
 
-        // Store rendered PNG buffer in L1 RAM cache only (skip Redis to prevent bandwidth/storage bloat;
-        // Vercel Edge CDN caches the response globally with immutable headers for 1 year)
-        await defaultCache.set(cacheKey, pngBuffer, TTL.OG_IMAGE_SECONDS, { skipRedis: true });
-
         res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Cache-Control', 'public, max-age=31536000, s-maxage=31536000, immutable');
+        if (degraded) {
+            // Short-lived so a complete card replaces this one once upstreams recover
+            res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=3600');
+        } else {
+            // Keep complete PNGs in a small dedicated RAM cache (never Redis, never the shared data LRU);
+            // Vercel Edge CDN caches the response globally with immutable headers for 1 year
+            setOgPng(cacheKey, pngBuffer, TTL.OG_IMAGE_SECONDS);
+            res.setHeader('Cache-Control', OG_IMMUTABLE_CACHE_CONTROL);
+        }
         res.setHeader('X-Cache', 'MISS');
         res.send(pngBuffer);
     } catch (error) {
@@ -921,7 +1013,7 @@ app.get('/lyrics', requireGameClient, async (req, res) => {
     } catch (error) {
         console.error('Error fetching lyrics:', error.message);
         res.setHeader('Cache-Control', 'no-store');
-        res.status(500).send('Failed to fetch lyrics.');
+        res.status(error.statusCode || 500).send('Failed to fetch lyrics.');
     }
 });
 
