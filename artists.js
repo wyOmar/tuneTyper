@@ -50,7 +50,7 @@ const FEATURED_ARTISTS = [
             {
                 "title": "Please Please Please",
                 "album": "Short n' Sweet",
-                "year": "2025",
+                "year": "2024",
                 "cover": "https://cdn-images.dzcdn.net/images/cover/8d00e66cfc38b2b85578a084de0bd30f/250x250-000000-80-0-0.jpg"
             },
             {
@@ -61,7 +61,7 @@ const FEATURED_ARTISTS = [
             },
             {
                 "title": "Feather",
-                "album": "emails i can’t send fwd:",
+                "album": "emails i can't send fwd:",
                 "year": "2023",
                 "cover": "https://cdn-images.dzcdn.net/images/cover/7aaba890ad0aa01f1e809578ad926322/250x250-000000-80-0-0.jpg"
             },
@@ -177,10 +177,10 @@ const FEATURED_ARTISTS = [
                 "cover": "https://cdn-images.dzcdn.net/images/cover/d85200712419ae036b277deffeea5181/250x250-000000-80-0-0.jpg"
             },
             {
-                "title": "Guess",
-                "album": "Guess featuring billie eilish",
-                "year": "2024",
-                "cover": "https://cdn-images.dzcdn.net/images/cover/a6a00854b95f19a50772e50bdd2c4a0e/250x250-000000-80-0-0.jpg"
+                "title": "What Was I Made For?",
+                "album": "What Was I Made For? [From The Motion Picture \"Barbie\"]",
+                "year": "2023",
+                "cover": "https://cdn-images.dzcdn.net/images/cover/2562b8d68b75635bb2d4b92dc7ed9ab5/250x250-000000-80-0-0.jpg"
             }
         ]
     },
@@ -321,7 +321,7 @@ const FEATURED_ARTISTS = [
             {
                 "title": "Into You",
                 "album": "Dangerous Woman",
-                "year": "2021",
+                "year": "2016",
                 "cover": "https://cdn-images.dzcdn.net/images/cover/1a8f399e9ddbb8ec2530232c0dfd953f/250x250-000000-80-0-0.jpg"
             },
             {
@@ -710,7 +710,7 @@ const FEATURED_ARTISTS = [
             {
                 "title": "Bohemian Rhapsody",
                 "album": "A Night At The Opera",
-                "year": "2005",
+                "year": "1975",
                 "cover": "https://cdn-images.dzcdn.net/images/cover/0b56f4eee05fa1ea753c5654b2cdb70c/250x250-000000-80-0-0.jpg"
             },
             {
@@ -734,7 +734,7 @@ const FEATURED_ARTISTS = [
             {
                 "title": "Under Pressure",
                 "album": "Hot Space",
-                "year": "2011",
+                "year": "1981",
                 "cover": "https://cdn-images.dzcdn.net/images/cover/051352b56a65f61a396e22bd5ec0687a/250x250-000000-80-0-0.jpg"
             }
         ]
@@ -839,7 +839,7 @@ const FEATURED_ARTISTS = [
             {
                 "title": "Heartless",
                 "album": "808s & Heartbreak",
-                "year": "2019",
+                "year": "2008",
                 "cover": "https://cdn-images.dzcdn.net/images/cover/228b13129645206ddccb4dac839bf62d/250x250-000000-80-0-0.jpg"
             },
             {
@@ -1030,7 +1030,7 @@ const FEATURED_ARTISTS = [
             {
                 "title": "Single Ladies",
                 "album": "HOMECOMING: THE LIVE ALBUM",
-                "year": "2019",
+                "year": "2008",
                 "cover": "https://cdn-images.dzcdn.net/images/cover/d65174ae1c9bd60b5dd7b377c08c0755/250x250-000000-80-0-0.jpg"
             }
         ]
@@ -1406,10 +1406,13 @@ function renderArtistHtml(artist, baseIndexHtml) {
         (_, restAttrs) => `<input type="text" id="artist-input" value="${safeArtistName}"${restAttrs}>`
     );
 
-    // Inject standalone Popular Tracks container underneath the main game container
-    if (html.includes("<div id=\"artist-tracks-slot\"></div>")) {
-        html = html.replace("<div id=\"artist-tracks-slot\"></div>", () => shelfHtml);
-    }
+    // Inject standalone Popular Tracks container underneath the main game container.
+    // The shelf goes INSIDE the slot so the client (renderArtistPopularTracksShelf) can
+    // still find #artist-tracks-slot and replace the shelf when another artist is searched.
+    html = html.replace(
+        /<div id=["']artist-tracks-slot["']><\/div>/i,
+        () => `<div id="artist-tracks-slot">\n${shelfHtml}\n</div>`
+    );
 
     // Hide curated playlists shelf on artist landing routes so artist tracks are front-and-center
     html = html.replace(
@@ -1436,7 +1439,9 @@ function renderArtistHtml(artist, baseIndexHtml) {
     return html;
 }
 
-function generateSitemapXml(baseUrl = "https://type.vincentchan.uk", lastmod = "2026-10-31") {
+// lastmod is optional: only emit it when the caller supplies a real modification date (YYYY-MM-DD).
+// A hard-coded date goes stale and misleads crawlers; omitting it is valid per the sitemap protocol.
+function generateSitemapXml(baseUrl = "https://type.vincentchan.uk", lastmod = null) {
     const urls = [
         { loc: `${baseUrl}/`, priority: "1.0", changefreq: "weekly" },
         ...FEATURED_ARTISTS.map(artist => ({
@@ -1449,7 +1454,7 @@ function generateSitemapXml(baseUrl = "https://type.vincentchan.uk", lastmod = "
     const entries = urls.map(u => [
         "  <url>",
         `    <loc>${u.loc}</loc>`,
-        `    <lastmod>${lastmod}</lastmod>`,
+        ...(lastmod ? [`    <lastmod>${lastmod}</lastmod>`] : []),
         `    <changefreq>${u.changefreq}</changefreq>`,
         `    <priority>${u.priority}</priority>`,
         "  </url>"
