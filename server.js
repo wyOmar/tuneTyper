@@ -983,13 +983,16 @@ app.get(['/api/og/track', '/og/track/:id.png'], async (req, res) => {
             degraded = true;
         }
 
-        const { pngBuffer } = await generateSongOgImage({
+        const { pngBuffer, coverFallback } = await generateSongOgImage({
             track: trackTitle,
             artist: artistName,
             album: albumTitle,
             coverUrl,
             lyrics
         });
+
+        // Cover download failed inside the renderer (logo substituted) -> also a degraded card
+        if (coverFallback) degraded = true;
 
         res.setHeader('Content-Type', 'image/png');
         if (degraded) {

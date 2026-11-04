@@ -237,6 +237,30 @@ test('HTTP hardening: ID validation, status propagation, origin guard, static he
         const keys = app._cache._l1Size() - l1Before;
         assert.ok(keys <= 2, `only track details/lyrics entries expected in shared L1, got ${keys}`);
     });
+
+    await t.test('failed cover download inside the renderer also gets the short cache header', async () => {
+        app._cache.clearMemory();
+        axios.get = async (url) => {
+            if (url.includes('api.deezer.com/track/')) {
+                return {
+                    data: {
+                        id: 880002,
+                        title: 'Cover Outage Song',
+                        artist: { id: 1, name: 'Cover Outage Artist' },
+                        album: { id: 2, title: 'Album', cover_big: 'https://cdn.example.com/cover2.jpg' }
+                    }
+                };
+            }
+            if (url.includes('api.lyrics.ovh')) {
+                return { data: { lyrics: 'some words to show on the card' } };
+            }
+            throw new Error('cover offline');
+        };
+
+        const res = await requestApp(server, '/api/og/track?id=880002', { headers: {} });
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.headers['cache-control'], 'public, max-age=300, s-maxage=3600');
+    });
 });
 
 test('Cron warms every curated playlist, default first, rotating the rest daily', () => {
