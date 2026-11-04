@@ -1420,6 +1420,9 @@ function renderArtistHtml(artist, baseIndexHtml) {
         '<div id="curated-playlists-slot" style="display: none;"></div>'
     );
 
+    // The homepage "What is TuneTyper?" copy would be duplicated across every artist page; keep it on / only
+    html = html.replace(/\s*<section id=["']about-tunetyper["'][\s\S]*?<\/section>/i, '');
+
     // Highlight current artist link in footer navigation
     const escapedSlugForRegex = artist.slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     html = html.replace(
