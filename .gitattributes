@@ -1,0 +1,4 @@
+* text=auto
+public/sitemap.xml text eol=lf
+*.png binary
+*.ttf binary
