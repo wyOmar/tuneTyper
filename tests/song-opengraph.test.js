@@ -302,7 +302,7 @@ test.describe('Dynamic Song OpenGraph Generator & SSR Metadata', () => {
             assert.equal(res.status, 200);
 
             const html = await res.text();
-            assert.ok(html.includes('<title>TuneTyper - Type Song Lyrics &amp; Guess the Tune</title>'));
+            assert.ok(html.includes('<title>TuneTyper - Song Lyrics Typing Game | Test Your WPM</title>'));
             assert.ok(html.includes('content="https://type.vincentchan.uk/og-image.png"'));
         });
 

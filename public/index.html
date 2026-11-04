@@ -16,12 +16,12 @@
     <link rel="shortcut icon" href="/favicon/favicon.ico">
     <link rel="canonical" href="https://type.vincentchan.uk/">
 
-    <title>TuneTyper - Type Song Lyrics &amp; Guess the Tune</title>
-    <meta name="description" content="Type lyrics from your favorite artists, test your typing speed, and guess the song in TuneTyper. The ultimate music typing game. Play free online now!">
-    <meta name="keywords" content="typing game, music game, song lyrics typing, WPM typing test, typing speed, music lovers, guess the tune, typing and music">
+    <title>TuneTyper - Song Lyrics Typing Game | Test Your WPM</title>
+    <meta name="description" content="TuneTyper is a free song lyrics typing game. Type the lyrics of real songs by your favourite artists, test your WPM, then guess the tune. Play in your browser.">
+    <meta name="keywords" content="song lyrics typing game, song typer, lyrics typer, typing game, music game, song lyrics typing, WPM typing test, typing speed, music lovers, guess the tune, typing and music">
     <meta name="author" content="Vincent Chan">
     <meta name="robots" content="index, follow">
-    <meta property="og:title" content="TuneTyper - Type Song Lyrics &amp; Guess the Tune">
+    <meta property="og:title" content="TuneTyper - Song Lyrics Typing Game | Test Your WPM">
     <meta property="og:description" content="Type lyrics from your favorite artists, guess the tune, and beat your WPM in TuneTyper. Play free in your browser!">
     <meta property="og:url" content="https://type.vincentchan.uk/">
     <meta property="og:type" content="website">
@@ -32,7 +32,7 @@
     <meta property="og:image:alt" content="TuneTyper: type song lyrics, guess the song, and beat your WPM. Play free at type.vincentchan.uk.">
     <meta property="og:site_name" content="TuneTyper">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="TuneTyper - Type Song Lyrics &amp; Guess the Tune">
+    <meta name="twitter:title" content="TuneTyper - Song Lyrics Typing Game | Test Your WPM">
     <meta name="twitter:description" content="Type lyrics from your favorite artists, guess the tune, and beat your WPM in TuneTyper. Play free in your browser!">
     <meta name="twitter:image" content="https://type.vincentchan.uk/og-image.png">
     <meta name="twitter:image:alt" content="TuneTyper: type song lyrics, guess the song, and beat your WPM. Play free at type.vincentchan.uk.">
@@ -226,6 +226,24 @@
         </section>
     </div>
     <footer class="footer">
+        <details id="about-tunetyper" class="artist-seo-collapse about-collapse">
+            <summary class="artist-seo-summary">
+                <span class="artist-seo-summary-label">About TuneTyper</span>
+                <svg class="artist-seo-chevron" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+            </summary>
+            <div class="about-content">
+                <h2>What is TuneTyper? <span class="about-sub">— The song lyrics typing game</span></h2>
+                <p>TuneTyper is a free typing game where you type the lyrics of real songs instead of random words. Search any artist or song, pick a playlist like 20s Pop or the UK Top 40, and type the lyrics as fast and accurately as you can. When you finish, try to guess the song from audio snippets and hints.</p>
+                <h3>How is WPM calculated?</h3>
+                <p>Words per minute uses the standard typing-test formula: correctly typed characters divided by five, per minute. Accuracy counts every keystroke, so mistakes you fix still count against you.</p>
+                <h3>Is TuneTyper free?</h3>
+                <p>Yes. TuneTyper is completely free and runs in your browser with no account or download. It works on desktop and mobile.</p>
+                <h3>Can I challenge a friend?</h3>
+                <p>After a round, share your score or a challenge link. Your friend gets the exact same lyrics, so you can compare WPM on the same song.</p>
+            </div>
+        </details>
         <details class="artist-seo-collapse">
             <summary class="artist-seo-summary">
                 <span class="artist-seo-summary-label">Popular Artists</span>
@@ -283,14 +301,26 @@
     <script id="structured-data" type="application/ld+json">
         {
           "@context": "https://schema.org",
-          "@type": "WebSite",
-          "name": "TuneTyper",
-          "url": "https://type.vincentchan.uk",
-          "description": "A fun typing game for music lovers. Improve and test your typing speed on your favourite song lyrics!",
-          "author": {
-            "@type": "Person",
-            "name": "Vincent Chan"
-          }
+          "@graph": [
+            {
+              "@type": "WebSite",
+              "name": "TuneTyper",
+              "url": "https://type.vincentchan.uk",
+              "description": "A free song lyrics typing game. Type the lyrics of real songs, test your WPM and guess the tune.",
+              "author": { "@type": "Person", "name": "Vincent Chan" }
+            },
+            {
+              "@type": "WebApplication",
+              "name": "TuneTyper",
+              "url": "https://type.vincentchan.uk",
+              "applicationCategory": "GameApplication",
+              "operatingSystem": "Any",
+              "browserRequirements": "Requires JavaScript",
+              "description": "Song lyrics typing game: type the lyrics of songs by your favourite artists, measure your words per minute and accuracy, then guess the song.",
+              "offers": { "@type": "Offer", "price": "0", "priceCurrency": "GBP" },
+              "author": { "@type": "Person", "name": "Vincent Chan" }
+            }
+          ]
         }
     </script>
 
