@@ -87,7 +87,7 @@ function buildCuratedPlaylistsShelfHtml(activePlaylistId = DEFAULT_PLAYLIST_ID) 
         `<section id="curated-playlists-shelf" class="container artist-tracks-container curated-playlists-container" aria-label="Popular playlists">`,
         `    <div class="artist-shelf-header">`,
         `        <h2 class="artist-shelf-title playlist-shelf-title">Popular Playlists <span class="artist-shelf-sub">\u2014 Choose a Playlist</span></h2>`,
-        `        <span class="artist-genre-badge playlist-badge">5 Curated</span>`,
+        `        <span class="artist-genre-badge playlist-badge">${CURATED_PLAYLISTS.length} Curated</span>`,
         `    </div>`,
         `    <div class="artist-tracks-grid curated-playlists-grid">`,
         cardsHtml,
