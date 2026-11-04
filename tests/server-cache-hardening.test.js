@@ -238,3 +238,19 @@ test('HTTP hardening: ID validation, status propagation, origin guard, static he
         assert.ok(keys <= 2, `only track details/lyrics entries expected in shared L1, got ${keys}`);
     });
 });
+
+test('Cron warms every curated playlist, default first, rotating the rest daily', () => {
+    const app = require('../server');
+    const { CURATED_PLAYLISTS, DEFAULT_PLAYLIST_ID } = require('../playlists');
+    const day = 86400000;
+    const a = app._getWarmPlaylistOrder(0);
+    const b = app._getWarmPlaylistOrder(day);
+
+    assert.equal(a[0], DEFAULT_PLAYLIST_ID);
+    assert.equal(b[0], DEFAULT_PLAYLIST_ID);
+    for (const p of CURATED_PLAYLISTS) {
+        assert.ok(a.includes(p.id), `${p.name} must be warmed`);
+    }
+    assert.equal(new Set(a).size, a.length, 'no playlist warmed twice');
+    assert.notEqual(a[1], b[1], 'second slot rotates between days');
+});

@@ -280,6 +280,24 @@ async function warmSinglePlaylist(playlistId, options = {}) {
 }
 
 /**
+ * Order in which the daily cron warms playlists: the homepage default first, then every
+ * other curated playlist (plus UK Top 40 if it isn't curated) rotated by day, so that on
+ * cold days when the time budget runs out, a different playlist gets priority each run.
+ */
+function getWarmPlaylistOrder(now = Date.now()) {
+    const others = [];
+    for (const p of CURATED_PLAYLISTS) {
+        if (p && p.id && p.id !== DEFAULT_PLAYLIST_ID && !others.includes(p.id)) others.push(p.id);
+    }
+    if (UK_TOP_40_PLAYLIST_ID !== DEFAULT_PLAYLIST_ID && !others.includes(UK_TOP_40_PLAYLIST_ID)) {
+        others.push(UK_TOP_40_PLAYLIST_ID);
+    }
+    if (others.length === 0) return [DEFAULT_PLAYLIST_ID];
+    const dayIndex = Math.floor(now / 86400000) % others.length;
+    return [DEFAULT_PLAYLIST_ID, ...others.slice(dayIndex), ...others.slice(0, dayIndex)];
+}
+
+/**
  * Pre-warms curated playlists (default 20s Pop + other curated playlists) and SEO artist tracks.
  */
 async function warmCuratedPlaylistsCache(options = {}) {
@@ -287,7 +305,7 @@ async function warmCuratedPlaylistsCache(options = {}) {
     const concurrency = options.concurrency || 5;
     const playlistIds = Array.isArray(options.playlistIds) && options.playlistIds.length > 0
         ? options.playlistIds
-        : (options.playlistId ? [options.playlistId] : [DEFAULT_PLAYLIST_ID, UK_TOP_40_PLAYLIST_ID]);
+        : (options.playlistId ? [options.playlistId] : getWarmPlaylistOrder(options.now));
 
     const deadline = options.deadline || (Date.now() + WARM_TIME_BUDGET_MS);
     const playlistSummaries = [];
@@ -447,7 +465,7 @@ app.get('/', async (req, res) => {
     res.sendFile(indexHtmlPath);
 });
 
-// Daily Vercel Cron Route: Pre-warms UK Top 40 + curated artist lyrics 24/7
+// Daily Vercel Cron Route: Pre-warms every curated playlist + featured artist lyrics 24/7
 app.get('/api/cron/warm-cache', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     const cronSecret = (process.env.CRON_SECRET || '').trim();
@@ -1052,6 +1070,7 @@ if (require.main === module) {
 app._cache = defaultCache;
 app._warmUkTop40Cache = warmUkTop40Cache;
 app._warmCuratedPlaylistsCache = warmCuratedPlaylistsCache;
+app._getWarmPlaylistOrder = getWarmPlaylistOrder;
 app._getPlaylistTracks = getPlaylistTracks;
 app._fetchAndCacheLyrics = fetchAndCacheLyrics;
 app._requireGameClient = requireGameClient;
