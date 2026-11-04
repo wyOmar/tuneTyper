@@ -14,7 +14,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 const axios = require('axios');
 const { Resvg } = require('@resvg/resvg-js');
 const { FEATURED_ARTISTS } = require('../artists');
@@ -261,7 +260,7 @@ async function getCoverDataUri(artist) {
     if (fs.existsSync(cachedFile)) {
         imageBuffer = fs.readFileSync(cachedFile);
     } else {
-        const response = await axios.get(leadTrack.cover, { responseType: 'arraybuffer' });
+        const response = await axios.get(leadTrack.cover, { responseType: 'arraybuffer', timeout: 15000 });
         imageBuffer = Buffer.from(response.data);
         fs.writeFileSync(cachedFile, imageBuffer);
     }
@@ -538,11 +537,12 @@ function buildArtistOgSvg(artist, coverDataUri, logoDataUri) {
             currentLineLen += addedLen;
         } else {
             lines.push(currentLineTokens);
-            currentLineTokens = [token];
-            currentLineLen = token.text.length;
-            if (lines.length === 2) {
+            if (lines.length === 3) {
+                currentLineTokens = [];
                 break;
             }
+            currentLineTokens = [token];
+            currentLineLen = token.text.length;
         }
     }
     if (lines.length < 3 && currentLineTokens.length > 0) {

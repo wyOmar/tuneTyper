@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "A typing game that fetches song lyrics and challenges users to type them.",
   "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "vercel dev",

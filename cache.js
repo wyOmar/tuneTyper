@@ -1,8 +1,11 @@
+const crypto = require('crypto');
+
 const nativeFetch = typeof globalThis.fetch === 'function'
     ? globalThis.fetch.bind(globalThis)
     : null;
 
-const CACHE_PREFIX = 'tt:v1';
+// v2: cache keys now preserve non-Latin letters (v1 keys collapsed e.g. all-Hangul titles to '')
+const CACHE_PREFIX = 'tt:v2';
 
 function playlistPlayableKey(playlistId) {
     return `${CACHE_PREFIX}:playlist:${String(playlistId).trim()}:playable`;
@@ -31,13 +34,20 @@ const TTL = {
 };
 
 function normalizeCachePart(value) {
-    return String(value || '')
+    const raw = String(value || '');
+    const normalized = raw
         .normalize('NFKD')
         .replace(/[\u0300-\u036f]/g, '')
+        .normalize('NFC')
         .toLowerCase()
         .replace(/[\u2018\u2019\u201A\u201B`]/g, "'")
-        .replace(/[^a-z0-9']+/g, ' ')
+        .replace(/[^\p{L}\p{N}']+/gu, ' ')
         .trim();
+    if (!normalized && raw.trim()) {
+        // Symbol/emoji-only input: keep keys distinct with a short stable hash
+        return `h${crypto.createHash('sha1').update(raw.trim()).digest('hex').slice(0, 12)}`;
+    }
+    return normalized;
 }
 
 function stripTrackDecorations(title) {
