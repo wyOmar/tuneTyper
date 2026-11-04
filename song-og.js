@@ -20,12 +20,26 @@ function getLogoDataUri() {
     return cachedLogoDataUri || '';
 }
 
+const SITE_ORIGIN = 'https://type.vincentchan.uk';
+
+// Characters that are illegal in XML 1.0 (C0 controls except TAB/LF/CR, U+FFFE/U+FFFF) plus
+// unpaired UTF-16 surrogates. Any of these in an SVG makes resvg's XML parser throw.
+const XML_ILLEGAL_CHARS_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/**
+ * Remove characters that cannot appear in an XML document
+ */
+function stripXmlIllegalChars(str) {
+    if (!str || typeof str !== 'string') return '';
+    return str.replace(XML_ILLEGAL_CHARS_RE, '');
+}
+
 /**
  * Safely escape XML entities for SVG rendering
  */
 function escapeXml(str) {
     if (!str || typeof str !== 'string') return '';
-    return str
+    return stripXmlIllegalChars(str)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
@@ -302,20 +316,88 @@ function wrapWords(text, maxCharsPerLine = 20, maxLines = 2) {
         }
     }
     if (currentLine) lines.push(currentLine);
-    return lines;
+    // Never let a line exceed the budget: the last line absorbs leftover words, and a single
+    // very long word can overflow any line, so clip with an ellipsis at a word boundary.
+    return lines.map(line => (line.length > maxCharsPerLine ? truncateAtWord(line, maxCharsPerLine - 1) : line));
+}
+
+/**
+ * Rough per-character advance width (in em) for the bundled DejaVu fonts.
+ * Deliberately a little generous so estimates err towards fitting inside the frame.
+ */
+function charWidthEm(ch, { mono = false, bold = false } = {}) {
+    const cp = ch.codePointAt(0);
+    // East Asian wide / fullwidth / emoji: roughly a full em in any font
+    if (
+        (cp >= 0x1100 && cp <= 0x115F) ||
+        (cp >= 0x2E80 && cp <= 0xA4CF) ||
+        (cp >= 0xAC00 && cp <= 0xD7A3) ||
+        (cp >= 0xF900 && cp <= 0xFAFF) ||
+        (cp >= 0xFE30 && cp <= 0xFE4F) ||
+        (cp >= 0xFF00 && cp <= 0xFF60) ||
+        (cp >= 0xFFE0 && cp <= 0xFFE6) ||
+        (cp >= 0x1F300 && cp <= 0x1FAFF) ||
+        (cp >= 0x20000 && cp <= 0x3FFFD)
+    ) {
+        return 1.0;
+    }
+    if (mono) return 1233 / 2048; // DejaVu Sans Mono advance (~0.602em)
+    let w;
+    if (ch === ' ') w = 0.32;
+    else if (/[ijlI.,:;'!|`]/.test(ch)) w = 0.3;
+    else if (/[frt()\[\]\-"]/.test(ch)) w = 0.42;
+    else if (/[mwMW@%]/.test(ch)) w = 0.9;
+    else if (/[A-Z&]/.test(ch)) w = 0.72;
+    else w = 0.62;
+    return bold ? w * 1.1 : w;
+}
+
+/**
+ * Estimate rendered width of text in px for a given font size
+ */
+function estimateTextWidth(text, fontSize, opts = {}) {
+    if (!text) return 0;
+    let em = 0;
+    for (const ch of text) em += charWidthEm(ch, opts);
+    return em * fontSize;
+}
+
+/**
+ * Truncate text with an ellipsis so its estimated width fits within maxWidth px.
+ * Prefers word boundaries (truncateAtWord) unless that would discard too much of the text.
+ */
+function fitTextToWidth(text, maxWidth, fontSize, opts = {}) {
+    if (!text || typeof text !== 'string') return '';
+    if (estimateTextWidth(text, fontSize, opts) <= maxWidth) return text;
+
+    const budget = maxWidth - estimateTextWidth('…', fontSize, opts);
+    const chars = Array.from(text);
+    let used = 0;
+    let count = 0;
+    for (const ch of chars) {
+        const w = charWidthEm(ch, opts) * fontSize;
+        if (used + w > budget) break;
+        used += w;
+        count++;
+    }
+    const hard = chars.slice(0, count).join('').trimEnd();
+    if (!hard) return '…';
+    // Cut at the last word boundary inside the prefix we know fits (the next char decides
+    // whether the prefix already ends on a word boundary).
+    const nextChar = chars[count] || '';
+    const atWord = /\s/.test(nextChar) ? hard + '…' : truncateAtWord(hard + ' ', hard.length);
+    if (atWord.length - 1 >= hard.length * 0.6) return atWord;
+    return hard + '…';
 }
 
 /**
  * Build 1200x630 SVG for dynamic Song OpenGraph card
  */
 function buildSongOgSvg({ track, artist, album, coverDataUri, logoDataUri, lyricsSnippet }) {
-    const rawTrack = track || 'Unknown Track';
-    const rawArtist = artist || 'Unknown Artist';
-    const rawAlbum = album || rawTrack || 'Single';
-
-    const safeTrack = escapeXml(rawTrack);
-    const safeArtist = escapeXml(rawArtist);
-    const safeAlbum = escapeXml(rawAlbum);
+    // Strip XML-illegal characters up-front so length/width estimates match what is rendered
+    const rawTrack = stripXmlIllegalChars(track).trim() || 'Unknown Track';
+    const rawArtist = stripXmlIllegalChars(artist).trim() || 'Unknown Artist';
+    const rawAlbum = stripXmlIllegalChars(album).trim() || rawTrack || 'Single';
 
     // 1. Header font scaling: scale down smoothly as track length increases so full title fits without truncating
     let headerFontSize = 42;
@@ -330,6 +412,11 @@ function buildSongOgSvg({ track, artist, album, coverDataUri, logoDataUri, lyric
         headerFontSize = 36;
         headerY = 89;
     }
+    // "TuneTyper / " is set at 44px bold mono from x=132; the track title gets the rest of the
+    // row up to the 56px right margin. Clip very long titles rather than overflow the card.
+    const headerPrefixWidth = estimateTextWidth('TuneTyper / ', 44, { mono: true });
+    const headerTrackMaxWidth = 1200 - 56 - 132 - headerPrefixWidth;
+    const safeHeaderTrack = escapeXml(fitTextToWidth(rawTrack, headerTrackMaxWidth, headerFontSize, { mono: true }));
 
     // 2. Tagline font scaling: ensure full track and artist fit without overflowing the 1200px frame
     const combinedTaglineLen = rawTrack.length + rawArtist.length;
@@ -339,14 +426,51 @@ function buildSongOgSvg({ track, artist, album, coverDataUri, logoDataUri, lyric
     } else if (combinedTaglineLen > 36) {
         taglineFontSize = 21;
     }
+    const taglineMaxWidth = 1200 - 56 * 2;
+    const taglinePrefix = 'Type the lyrics to ';
+    const taglineBy = ' by ';
+    let taglineSuffix = '. Test and train your typing speed.';
+    const taglineWidthAt = (suffix, fs) =>
+        estimateTextWidth(taglinePrefix + taglineBy + suffix, fs) +
+        estimateTextWidth(rawTrack + rawArtist, fs, { bold: true });
+    // Step down further if the width estimate still overflows, then drop the trailing sentence
+    for (const fs of [24, 21, 19]) {
+        if (fs > taglineFontSize) continue;
+        taglineFontSize = fs;
+        if (taglineWidthAt(taglineSuffix, fs) <= taglineMaxWidth) break;
+    }
+    if (taglineWidthAt(taglineSuffix, taglineFontSize) > taglineMaxWidth) {
+        taglineSuffix = '.';
+    }
+    // Last resort: clip track/artist names (artist gets at most 40% of the remaining space)
+    let taglineTrack = rawTrack;
+    let taglineArtist = rawArtist;
+    const namesBudget = taglineMaxWidth - estimateTextWidth(taglinePrefix + taglineBy + taglineSuffix, taglineFontSize);
+    const trackW = estimateTextWidth(rawTrack, taglineFontSize, { bold: true });
+    const artistW = estimateTextWidth(rawArtist, taglineFontSize, { bold: true });
+    if (trackW + artistW > namesBudget) {
+        const artistBudget = Math.min(artistW, namesBudget * 0.4);
+        taglineArtist = fitTextToWidth(rawArtist, artistBudget, taglineFontSize, { bold: true });
+        const usedArtist = estimateTextWidth(taglineArtist, taglineFontSize, { bold: true });
+        taglineTrack = fitTextToWidth(rawTrack, namesBudget - usedArtist, taglineFontSize, { bold: true });
+    }
+    const safeTaglineTrack = escapeXml(taglineTrack);
+    const safeTaglineArtist = escapeXml(taglineArtist);
+    const safeTaglineSuffix = escapeXml(taglineSuffix);
 
     // 3. Track card multi-line wrapping: split long titles across 2 lines so the full title fits below album art
-    const trackCardLines = wrapWords(rawTrack, 20, 2);
+    // Card content area is the 214px album-art column (x 74 -> 288)
+    const cardWidth = 214;
+    const fitsOneLine = estimateTextWidth(rawTrack, 20, { bold: true }) <= cardWidth;
+    const trackCardLines = fitsOneLine
+        ? [rawTrack]
+        : wrapWords(rawTrack, 20, 2).map(line => fitTextToWidth(line, cardWidth, 17, { bold: true }));
     let cardTitleSvg = '';
     let cardMetaY = 478;
 
     if (trackCardLines.length === 1) {
-        cardTitleSvg = `<text x="74" y="445" fill="#ffffff" font-size="20" font-weight="bold" font-family="DejaVu Sans, Arial, sans-serif">${escapeXml(trackCardLines[0])}</text>`;
+        const size = fitsOneLine ? 20 : 17;
+        cardTitleSvg = `<text x="74" y="445" fill="#ffffff" font-size="${size}" font-weight="bold" font-family="DejaVu Sans, Arial, sans-serif">${escapeXml(trackCardLines[0])}</text>`;
         cardMetaY = 475;
     } else {
         cardTitleSvg = `
@@ -356,12 +480,13 @@ function buildSongOgSvg({ track, artist, album, coverDataUri, logoDataUri, lyric
     }
 
     const metaText = `${rawArtist} • ${rawAlbum}`;
-    const safeMetaText = escapeXml(truncate(metaText, 28));
+    const safeMetaText = escapeXml(fitTextToWidth(truncate(metaText, 28), cardWidth, 14));
 
-    // 4. Action button text: use specific track name for short titles, or clean "Play Track →" for longer titles to prevent awkward truncation
+    // 4. Action button text: use the track name when it fits the 264px button, else a clean "Play Track →"
     let ctaText = 'Play Track →';
-    if (rawTrack.length <= 15) {
-        ctaText = `Play ${rawTrack} →`;
+    const namedCta = `Play ${rawTrack} →`;
+    if (rawTrack.length <= 15 && estimateTextWidth(namedCta, 22, { mono: true, bold: true }) <= 264 - 24) {
+        ctaText = namedCta;
     }
 
     const logoUri = logoDataUri || getLogoDataUri();
@@ -436,12 +561,12 @@ function buildSongOgSvg({ track, artist, album, coverDataUri, logoDataUri, lyric
   <!-- Brand Header: full-width, no overlapping pill -->
   <g id="header">
     <image href="${escapeXml(logoUri)}" x="56" y="46" width="58" height="58" clip-path="url(#logoClip)"/>
-    <text x="132" y="${headerY}" fill="#ffffff" font-size="44" font-weight="bold" font-family="DejaVu Sans Mono, monospace">TuneTyper<tspan fill="#555555" font-weight="300"> / </tspan><tspan fill="#4caf50" font-size="${headerFontSize}">${safeTrack}</tspan></text>
+    <text x="132" y="${headerY}" fill="#ffffff" font-size="44" font-weight="bold" font-family="DejaVu Sans Mono, monospace">TuneTyper<tspan fill="#555555" font-weight="300"> / </tspan><tspan fill="#4caf50" font-size="${headerFontSize}">${safeHeaderTrack}</tspan></text>
   </g>
 
   <!-- Tagline: dynamically scaled so full track + artist are never truncated -->
   <text x="56" y="148" fill="#c0c0c0" font-size="${taglineFontSize}" font-family="DejaVu Sans, Arial, sans-serif">
-    Type the lyrics to <tspan fill="#4caf50" font-weight="bold">${safeTrack}</tspan> by <tspan fill="#ffffff" font-weight="bold">${safeArtist}</tspan>. Test and train your typing speed.
+    Type the lyrics to <tspan fill="#4caf50" font-weight="bold">${safeTaglineTrack}</tspan> by <tspan fill="#ffffff" font-weight="bold">${safeTaglineArtist}</tspan>${safeTaglineSuffix}
   </text>
 
   <!-- Left: Track Card with multi-line title wrapping -->
@@ -477,8 +602,15 @@ function buildSongOgSvg({ track, artist, album, coverDataUri, logoDataUri, lyric
  * Fetch an image URL and convert to base64 data URI
  */
 async function fetchImageDataUri(url) {
+    return (await fetchImageDataUriWithStatus(url)).dataUri;
+}
+
+/**
+ * Like fetchImageDataUri, but also reports whether the logo fallback was used
+ */
+async function fetchImageDataUriWithStatus(url) {
     if (!url || typeof url !== 'string' || !url.startsWith('http')) {
-        return getLogoDataUri();
+        return { dataUri: getLogoDataUri(), fallback: true };
     }
     try {
         const resp = await axios.get(url, {
@@ -488,9 +620,9 @@ async function fetchImageDataUri(url) {
         });
         const contentType = resp.headers['content-type'] || 'image/jpeg';
         const base64 = Buffer.from(resp.data).toString('base64');
-        return `data:${contentType};base64,${base64}`;
+        return { dataUri: `data:${contentType};base64,${base64}`, fallback: false };
     } catch (_) {
-        return getLogoDataUri();
+        return { dataUri: getLogoDataUri(), fallback: true };
     }
 }
 
@@ -514,7 +646,7 @@ function getFontFiles() {
  * Generate a PNG Buffer for a song OpenGraph card
  */
 async function generateSongOgImage({ track, artist, album, coverUrl, lyrics }) {
-    const coverDataUri = await fetchImageDataUri(coverUrl);
+    const { dataUri: coverDataUri, fallback: coverFallback } = await fetchImageDataUriWithStatus(coverUrl);
     const logoDataUri = getLogoDataUri();
     const lyricsSnippet = prepareLyricsSnippet(lyrics);
 
@@ -531,7 +663,9 @@ async function generateSongOgImage({ track, artist, album, coverUrl, lyrics }) {
     const resvg = new Resvg(svg, {
         font: {
             fontFiles: fontFiles.length > 0 ? fontFiles : undefined,
-            loadSystemFonts: true,
+            // Scanning system fonts costs seconds per render on desktop OSes (and serverless
+            // hosts have essentially none), so rely on the bundled DejaVu fonts when present.
+            loadSystemFonts: fontFiles.length === 0,
             defaultFontFamily: 'DejaVu Sans',
             monospaceFamily: 'DejaVu Sans Mono',
             sansSerifFamily: 'DejaVu Sans'
@@ -540,9 +674,15 @@ async function generateSongOgImage({ track, artist, album, coverUrl, lyrics }) {
     });
 
     const pngBuffer = resvg.render().asPng();
+    const lyricsFallback = !lyricsSnippet;
     return {
         pngBuffer,
-        contentType: 'image/png'
+        contentType: 'image/png',
+        // Degraded renders (logo instead of cover art / generic copy instead of lyrics): callers
+        // can use these to apply a shorter cache lifetime so a later request can do better.
+        coverFallback,
+        lyricsFallback,
+        usedFallback: coverFallback || lyricsFallback
     };
 }
 
@@ -563,18 +703,26 @@ function renderSongHtml(trackDetails, challenge, baseIndexHtml) {
     }
 
     const ogImageUrl = trackId
-        ? `https://type.vincentchan.uk/api/og/track?id=${encodeURIComponent(trackId)}`
-        : 'https://type.vincentchan.uk/og-image.png';
+        ? `${SITE_ORIGIN}/api/og/track?id=${encodeURIComponent(trackId)}`
+        : `${SITE_ORIGIN}/og-image.png`;
+
+    // og:url must point at the shared song, otherwise Facebook/LinkedIn resolve the page to the
+    // homepage and show the homepage card instead of the song card.
+    const shareUrl = trackId
+        ? `${SITE_ORIGIN}/?id=${encodeURIComponent(trackId)}`
+        : `${SITE_ORIGIN}/?artist=${encodeURIComponent(artistName)}&track=${encodeURIComponent(trackTitle)}`;
 
     const safeTitle = escapeXml(pageTitle);
     const safeDesc = escapeXml(description);
     const safeOgImage = escapeXml(ogImageUrl);
+    const safeShareUrl = escapeXml(shareUrl);
     const safeOgAlt = escapeXml(`TuneTyper challenge for "${trackTitle}" by ${artistName}: type the lyrics and beat your WPM.`);
 
     let html = baseIndexHtml;
 
     html = html.replace(/<title>[^<]*<\/title>/i, () => `<title>${safeTitle}</title>`);
     html = html.replace(/<meta\s+name=["']description["'][^>]*>/i, () => `<meta name="description" content="${safeDesc}">`);
+    html = html.replace(/<meta\s+property=["']og:url["'][^>]*>/i, () => `<meta property="og:url" content="${safeShareUrl}">`);
     html = html.replace(/<meta\s+property=["']og:title["'][^>]*>/i, () => `<meta property="og:title" content="${safeTitle}">`);
     html = html.replace(/<meta\s+property=["']og:description["'][^>]*>/i, () => `<meta property="og:description" content="${safeDesc}">`);
     html = html.replace(/<meta\s+property=["']og:image["'][^>]*>/i, () => `<meta property="og:image" content="${safeOgImage}">`);
@@ -589,6 +737,9 @@ function renderSongHtml(trackDetails, challenge, baseIndexHtml) {
 
 module.exports = {
     escapeXml,
+    stripXmlIllegalChars,
+    estimateTextWidth,
+    fitTextToWidth,
     truncate,
     truncateAtWord,
     wrapWords,
