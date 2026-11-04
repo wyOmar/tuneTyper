@@ -15,9 +15,12 @@ test('Homepage targets "song lyrics typing game" searches', async (t) => {
         assert.match(desc, /song lyrics typing game/i);
     });
 
-    await t.test('has crawlable "What is TuneTyper?" copy with an h2 and FAQ h3s', () => {
-        assert.match(indexHtml, /<section id="about-tunetyper"[\s\S]*?<h2[^>]*>What is TuneTyper\?/);
-        const faqs = indexHtml.match(/<section id="about-tunetyper"[\s\S]*?<\/section>/)[0].match(/<h3>/g) || [];
+    await t.test('has crawlable "What is TuneTyper?" copy in a collapsed footer <details>', () => {
+        const block = indexHtml.match(/<details id="about-tunetyper"[^>]*>[\s\S]*?<\/details>/)[0];
+        assert.ok(!/<details[^>]*\bopen\b/.test(block.split('>')[0]), 'collapsed by default');
+        assert.match(block, /<h2>What is TuneTyper\?/);
+        assert.ok(!/display:\s*none/.test(block), 'must not be display:none hidden');
+        const faqs = block.match(/<h3>/g) || [];
         assert.ok(faqs.length >= 3);
     });
 

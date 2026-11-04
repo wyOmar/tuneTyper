@@ -1902,25 +1902,34 @@ h1 {
         max-width: none;
     }
 }
-/* Homepage "What is TuneTyper?" copy (removed on artist routes) */
-.about-container {
-    color: #bbb;
-    font-size: 0.92rem;
+/* Homepage "About TuneTyper" collapsible (crawlable copy; removed on artist routes) */
+.about-content {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 4px 20px 6px;
+    font-size: 12.5px;
     line-height: 1.6;
+    color: #888;
     text-align: left;
 }
 
-.about-container .artist-shelf-title {
-    margin-bottom: 10px;
-}
-
-.about-container h3 {
-    margin: 14px 0 4px;
+.about-content h2,
+.about-content h3 {
+    margin: 10px 0 2px;
     font-family: monospace;
-    font-size: 0.92rem;
-    color: #ddd;
+    font-size: 12.5px;
+    color: #bbb;
 }
 
-.about-container p {
-    margin: 0 0 6px;
+.about-content h2 {
+    margin-top: 0;
+}
+
+.about-sub {
+    color: #777;
+    font-weight: normal;
+}
+
+.about-content p {
+    margin: 0 0 4px;
 }
