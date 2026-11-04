@@ -15,7 +15,6 @@
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",
     "axios": "^1.21.0",
-    "cors": "^2.8.5",
     "express": "^4.22.3"
   }
 }
